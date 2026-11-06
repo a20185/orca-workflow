@@ -131,7 +131,8 @@ sequenceDiagram
     G->>W: 创建工作区、环境和 Dispatch
     W->>G: accept，激活认领
     W->>G: 开发完成后 submit
-    G->>G: snapshot、记录版本、发送 merge_ready
+    G->>G: snapshot、记录版本
+    W->>G: 经受限入口发送 merge_ready
     G->>G: 暂停开发环境
     G->>R: 创建独立评审工作区和 Session
     R->>G: 逐项证据与评审结论
@@ -195,7 +196,7 @@ sequenceDiagram
 
 ### 5.4 提交后暂停开发环境
 
-开发完成后，执行 Session 调用 `task submit`。`gov` 记录 commit ID、tree ID 和开发证据，发送 `merge_ready`，然后暂停原环境。
+开发完成后，执行 Session 调用 `task submit`。`gov` 记录 commit ID、tree ID 和开发证据，确认受限启动器已在原终端发送 `merge_ready`，然后暂停原环境。
 
 暂停期间没有开发写入者，评审看到的是固定版本。连接中断时使用原请求 ID 查询结果，不创建第二次提交。
 
