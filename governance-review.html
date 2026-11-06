@@ -111,7 +111,7 @@
       <text x="646" y="294" font-size="14" font-weight="bold" fill="#14532d">评审容器 · 每次新开</text>
       <rect x="646" y="308" width="282" height="40" rx="6" fill="#ffffff" stroke="#86efac"/>
       <text x="658" y="332" font-size="12" fill="#166534">新评审员 · Claude 或 Codex</text>
-      <text x="646" y="368" font-size="11" fill="#166534">只看送审那份代码，自己改不了</text>
+      <text x="646" y="368" font-size="11" fill="#166534">只装送审那份代码；动了版本评审作废</text>
 
       <line x1="298" y1="125" x2="626" y2="125" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arrB)"/>
       <text x="440" y="116" font-size="12" fill="#2563eb" text-anchor="middle">开终端</text>
@@ -166,7 +166,7 @@
         <text x="260" y="383" font-size="14" font-weight="bold" fill="#ffffff" text-anchor="middle">4</text>
         <rect x="260" y="340" width="510" height="76" rx="10" fill="#eff6ff" stroke="#3b82f6"/>
         <text x="296" y="371" font-size="15" font-weight="bold" fill="#1e3a8a">开发</text>
-        <text x="296" y="397" font-size="12" fill="#475569">OpenCode 改指定文件、跑测试；越界的路径改不了</text>
+        <text x="296" y="397" font-size="12" fill="#475569">OpenCode 改指定文件、跑测试；交活时越界改动会被拒</text>
       </g>
       <line x1="515" y1="416" x2="515" y2="436" stroke="#94a3b8" stroke-width="1.8" marker-end="url(#arr2)"/>
       <g>
@@ -212,7 +212,7 @@
       <path d="M 770 578 L 872 578 L 872 378 L 774 378" fill="none" stroke="#d97706" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#arrO)"/>
       <text x="782" y="455" font-size="11" fill="#d97706">不过，退回重改</text>
       <text x="782" y="473" font-size="11" fill="#d97706">重交要换新评审员</text>
-      <text x="782" y="491" font-size="11" fill="#d97706">最多 3 轮，超了找人</text>
+      <text x="782" y="491" font-size="11" fill="#d97706">到轮数上限就找人</text>
     </svg>
     <figcaption>图 2 · 正常路线：从立任务到交结果一共九步，橙线是验收不过的回头路</figcaption>
   </figure>
@@ -254,7 +254,7 @@
       <line x1="470" y1="260" x2="434" y2="260" stroke="#64748b" stroke-width="1.8" marker-end="url(#a3)"/>
       <path d="M 250 260 L 115 260 L 115 184" fill="none" stroke="#64748b" stroke-width="1.8" marker-end="url(#a3)"/>
       <text x="92" y="228" font-size="11" fill="#6b7280">重交</text>
-      <text x="660" y="300" font-size="12" fill="#dc2626">同一份活最多 3 轮，再不行交给人决定</text>
+      <text x="660" y="300" font-size="12" fill="#dc2626">到任务书定的轮数上限，再不行交给人决定</text>
     </svg>
     <figcaption>图 3 · 岔路一：验收不过就退回本人改，重交必须换新评审员</figcaption>
   </figure>
@@ -349,7 +349,7 @@
     <tr><td>协调者</td><td class="yes">立任务、控制同时跑几个、处理异常</td><td class="no">不写代码，不验收</td></tr>
     <tr><td>执行者</td><td class="yes">接活、拆子任务、交活</td><td class="no">不能自己给自己验收</td></tr>
     <tr><td>干活 Agent · OpenCode</td><td class="yes">改任务书点名的文件、跑测试</td><td class="no">碰不了任务状态，碰不了别的目录</td></tr>
-    <tr><td>评审员 · Claude / Codex</td><td class="yes">重跑验收、逐条对证据</td><td class="no">改不了代码；立任务的、干活的、以前接过这活的，都不能当评审员</td></tr>
+    <tr><td>评审员 · Claude / Codex</td><td class="yes">重跑验收、逐条对证据</td><td class="no">改代码没用，动了版本评审作废；立任务的、干活的、以前接过这活的，都不能当评审员</td></tr>
     <tr><td>所有 Agent</td><td>走受限入口交活、问问题、发消息</td><td class="no">谁都不能直接跑 git、jj、Orca 管理命令</td></tr>
   </table>
 </section>
