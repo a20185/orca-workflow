@@ -341,7 +341,7 @@ stateDiagram-v2
 
 任务环境内的 `orca` 入口指向 root 所有的受限启动器。启动器通过 `sudo` 以 `orca-broker` 身份运行；`sudoers` 只允许这一固定入口，不允许 Agent 以该用户执行其他程序。启动器完成以下步骤：
 
-1. 根据调用进程的系统用户、容器实例和 `orca-broker` 持有的令牌，从 `gov` 反查当前活动认领或评审，取得任务、终端、Dispatch 和角色。Agent 传入的 worker 注入指令和身份字段一律不作为授权输入。
+1. 根据调用进程的系统用户、容器实例和 `orca-broker` 持有的令牌，从 `gov` 反查绑定到该容器实例的当前认领或评审（含等待接受的状态），取得任务、终端、Dispatch 和角色。Agent 传入的 worker 注入指令和身份字段一律不作为授权输入。
 2. 向 `gov` 提交规范化后的动作和参数，取得一次授权编号。
 3. 对 `gov` 动作，只允许当前角色在 §9.1 中可用的任务接口：执行 Session 的 `task accept`、`submit`、`split`、`rebase`、`status`，以及评审 Session 的 `review accept`、`review submit`、`status`。`declare`、`claim` 和人工恢复接口不在任务或评审环境开放。
 4. 对 `gov` 动作，启动器将请求交给 `gov` 执行并返回结果，不启动 Orca CLI，也不增加第二个 sudo 入口。
