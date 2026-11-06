@@ -37,7 +37,7 @@
 
 探针的阻塞范围分别如下：
 
-1. T0.2 的纯 jj 目录注册、启动或删除失败时，T2.3 及其后所有生命周期任务停止，Track A 与 Track B 都不得继续到这些任务。
+1. T0.2 的纯 jj 目录在两种注册入口下都无法完成注册、启动或删除时，T2.3 及其后所有生命周期任务停止，Track A 与 Track B 都不得继续到这些任务。
 2. T0.3 的受限启动器或 Dispatch 身份来源验证失败时，Track B 停止；Track A 只能用模拟消息继续治理状态测试。
 3. T0.4 的元数据权限验证失败时，Track B 停止；Track A 不得把宿主权限结果当作容器隔离证据。
 
@@ -81,6 +81,7 @@ graph TD
     P02 --> P21
     P03 --> P21
     P12 --> P13[T1.3 服务、身份与客户端]
+    P13 --> P23
     P13 --> P31[T3.1 声明与认领]
     P21 --> P31
     P22 --> P31
@@ -108,7 +109,8 @@ graph TD
 | W1 | T0.2、T0.3、T1.1 | 3 | 两项探针有结论；包接口已固定 |
 | W1b | T0.4 | 1 | 元数据权限探针完成（依赖 T0.2 的 jj workspace） |
 | W2 | T1.2、T2.1、T2.2 | 3 | 状态机和两个只读/版本适配层通过测试 |
-| W3 | T1.3、T2.3 | 2 | 服务身份、客户端和环境生命周期可用 |
+| W3 | T1.3 | 1 | 服务身份与客户端可用 |
+| W3b | T2.3 | 1 | 环境生命周期与综合 doctor 可用 |
 | W4 | T3.1 | 1 | 并发认领与接受流程通过 |
 | W5 | T3.2 | 1 | 提交、rebase、独立评审与逐项证据通过 |
 | W6 | T3.3 | 1 | 合并、归档和清理完整 |
@@ -164,9 +166,9 @@ W1 的三路并行只在临时资源充足时执行；探针共享 Orca 或 Dock
 ### T0.2 验证纯 jj 目录的 Orca 生命周期
 
 - **Files**：只创建 `probes/orca-jj-folder.md`；临时 jj 仓库位于独立临时目录。
-- **Inputs**：Orca `repo add`、`repo show`、`agent launch`、`worktree list`、`worktree rm` 的当前帮助；jj 0.41.0。
-- **Outputs**：folder kind 判定、启动回执、worktree ID、实际路径、删除行为、残余资源清单。
-- **Accept rule**：纯 jj 目录可注册、可启动独立 Agent、可删除，且 jj 共享仓库仍可查询；失败则记录准确错误，不尝试 Git worktree 替代。
+- **Inputs**：Orca `repo add`、`repo show`、`agent launch`、`worktree list`、`worktree rm` 与 `project setup-existing-folder` 的当前帮助；jj 0.41.0。
+- **Outputs**：folder kind 判定（含两种注册入口各自的结果）、启动回执、worktree ID、实际路径、删除行为、残余资源清单。
+- **Accept rule**：纯 jj 目录经任一可用入口完成注册、可启动独立 Agent、可删除，且 jj 共享仓库仍可查询；两种入口都失败才算平台缺口，失败时记录准确错误，不尝试 Git worktree 替代。
 - **Verification gate**：报告包含命令版本、JSON 关键字段、退出码和清理后 `worktree list` / `jj workspace list` 结果。
 
 ### T0.3 验证受限启动器与 Dispatch 身份来源
@@ -232,7 +234,7 @@ W1 的三路并行只在临时资源充足时执行；探针共享 Orca 或 Dock
 ### T2.3 实现本地 Docker SSH-mode 环境适配
 
 - **Files**：创建 `src/adapters/environment.ts`、`orca.yaml`、`scripts/orca-vm/`、`test/integration/environment/`。
-- **Inputs**：T0.2–T0.4；Orca per-workspace environment recipe 接口。
+- **Inputs**：T0.2–T0.4；T1.3 的基础 doctor 接口；Orca per-workspace environment recipe 接口。
 - **Outputs**：create、suspend、resume、destroy、静态与综合 `doctor`、资源 ID 和残余资源回执。
 - **Accept rule**：不启动云资源；create 输出符合 SSH-mode；suspend 后任务进程不能写入，resume 保留原终端和 Session；destroy 具有幂等记录；失败保留环境 ID；不提供 `destroy: none`。
 - **Verification gate**：免费静态检查无警告；临时容器 create/suspend/resume/destroy 两次结果一致；综合 `doctor` 同时报告 Node、Orca、jj、Docker、目录和版本；异常退出后资源可查明。
