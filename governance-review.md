@@ -373,7 +373,7 @@ sequenceDiagram
 | 受限启动器 | 任务环境内唯一的 `gov` 与 Orca 动作入口，按角色和 Dispatch 检查权限 |
 | SSH-mode | Orca 通过 SSH 管理任务环境，环境内不运行 Orca server |
 | `FENCED` | 旧认领已失效，不能继续提交或写入的状态 |
-| `cleanup_pending` | 合并已确认，但归档、环境删除或工作区注销尚未全部完成 |
+| `cleanup_pending` | 该销毁的任务或评审资源尚未销毁完，覆盖退回、失败、取消、被替代与合并后路径 |
 
 ## 12. 相关文档
 

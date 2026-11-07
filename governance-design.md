@@ -232,12 +232,19 @@ stateDiagram-v2
     ACTIVE --> SUPERSEDED: 旧认领已失效
     WAITING_CHILD --> ACTIVE: 子任务合并且恢复消息已记录
     WAITING_CHILD --> ACTIVE: 子任务取消或失败，不快进父版本
+    WAITING_CHILD --> WAITING_CHILD: 子任务被替代，等待目标改绑
     CHANGES_REQUESTED --> REVIEW_REQUESTED: 再次 submit 或 review request
+    CHANGES_REQUESTED --> FAILED: task fail
+    CHANGES_REQUESTED --> CANCELLED: 人工取消
+    REVIEW_REQUESTED --> FAILED: task fail
     CHANGES_REQUESTED --> WAITING_CHILD: 修复中发现前置问题
     CHANGES_REQUESTED --> SUPERSEDED: 新任务版本替代
     REVIEW_REQUESTED --> IN_REVIEW: 评审 Session accept
     REVIEW_REQUESTED --> ACTIVE: 目标移动需 rebase，未开始的评审取消
     REVIEW_REQUESTED --> SUPERSEDED: 新任务版本替代，取消评审
+    REVIEW_REQUESTED --> CANCELLED: 人工取消
+    REVIEW_REQUESTED --> ACTIVE: 执行者替换，旧提交作废
+    IN_REVIEW --> CANCELLED: 人工取消
     IN_REVIEW --> CHANGES_REQUESTED: 退回
     IN_REVIEW --> REVIEW_REQUESTED: 评审员死亡或中止，重建评审
     IN_REVIEW --> SUPERSEDED: 新任务版本替代，取消评审
@@ -252,20 +259,24 @@ stateDiagram-v2
 | 当前状态 | 事件 | 目标 | 环境与资源动作 |
 |---|---|---|---|
 | DECLARED | 执行 Session accept | ACTIVE | 工作区由只读切换为可写 |
-| DECLARED | 人工取消 | CANCELLED | 无资源，仅记账 |
-| DECLARED | 新任务版本替代 | SUPERSEDED | 无资源，仅记账 |
+| DECLARED | 人工取消 | CANCELLED | 结算未接受的 Dispatch，销毁已创建但未激活的环境与工作区 |
+| DECLARED | 新任务版本替代 | SUPERSEDED | 结算未接受的 Dispatch，销毁已创建但未激活的环境与工作区 |
 | ACTIVE | submit | REVIEW_REQUESTED | 记录版本；等待 merge_ready 后暂停开发环境 |
 | ACTIVE | task fail | FAILED | 确认后允许 worker_done --outcome failed；按 §8.6 清理 |
+| CHANGES_REQUESTED | task fail | FAILED | 同 ACTIVE 的失败动作 |
+| REVIEW_REQUESTED | task fail | FAILED | 先取消未开始的评审，再按失败动作清理 |
 | ACTIVE | task split | WAITING_CHILD | 固定父版本，暂停父环境，创建子任务 |
-| ACTIVE / CHANGES_REQUESTED | 人工取消 | CANCELLED | 结算 Dispatch，按 §8.6 清理 |
+| ACTIVE / CHANGES_REQUESTED / REVIEW_REQUESTED / IN_REVIEW | 人工取消 | CANCELLED | 在飞的评审取消并销毁评审资源；结算 Dispatch 后按 §8.6 清理 |
 | ACTIVE / CHANGES_REQUESTED / REVIEW_REQUESTED / IN_REVIEW | 新任务版本替代 | SUPERSEDED | 已启动的评审取消并销毁评审资源；按 §8.6 清理 |
 | WAITING_CHILD | 子任务合并且恢复消息已记录 | ACTIVE | 快进父版本，确认 tree 后恢复父环境 |
 | WAITING_CHILD | 子任务取消或失败 | ACTIVE | 不快进父版本；确认 tree 后恢复父环境，由父执行者自行处理 |
+| WAITING_CHILD | 子任务被替代 | WAITING_CHILD | 等待目标改绑替代任务，恢复条件沿用 |
 | CHANGES_REQUESTED | 再次 submit（新版本） | REVIEW_REQUESTED | 记录新版本，旧证据作废 |
 | CHANGES_REQUESTED | review request（同版本补证据） | REVIEW_REQUESTED | 复用版本，消耗评审轮数预算 |
 | CHANGES_REQUESTED | task split | WAITING_CHILD | 同 ACTIVE 的 split 动作 |
-| REVIEW_REQUESTED | 评审 Session accept | IN_REVIEW | 创建评审环境与工作区 |
+| REVIEW_REQUESTED | 评审 Session accept | IN_REVIEW | 评审环境与工作区已在进入 REVIEW_REQUESTED 时创建；accept 仅激活评审 |
 | REVIEW_REQUESTED | 目标移动需 rebase | ACTIVE | 取消未开始的评审；恢复开发环境执行 rebase |
+| REVIEW_REQUESTED | 执行者替换（结算旧 Dispatch 后） | ACTIVE | 旧提交作废；新执行者在保留的工作区上重新提交 |
 | IN_REVIEW | 退回 | CHANGES_REQUESTED | 销毁评审资源；tree 确认后恢复开发环境 |
 | IN_REVIEW | 评审员死亡或中止 | REVIEW_REQUESTED | 销毁评审资源；重建评审环境与新评审 Session |
 | IN_REVIEW | 全部验收通过 | APPROVED | 销毁评审资源 |
@@ -365,7 +376,7 @@ stateDiagram-v2
 
 | 资源 | 销毁时机 |
 |---|---|
-| 评审环境与评审工作区 | 评审结论提交并受理后立即销毁，无论通过、退回还是中止；退回后的下一轮提交前必须确认已销毁 |
+| 评审环境与评审工作区 | 评审结论受理且评审 Dispatch 结算（worker_done 或 release 回执）后销毁，无论通过、退回还是中止；退回后的下一轮提交前必须确认已销毁 |
 | 失败或取消任务的全部资源 | `task fail` / 人工取消的结算回执与证据归档完成后 |
 | 被替代任务的全部资源 | SUPERSEDED 迁移与归档完成后；在飞的评审同时取消并销毁 |
 | 正常路径资源 | 按 §8.4：合并确认、写入者退出、归档完成后 |
@@ -404,7 +415,7 @@ stateDiagram-v2
 
 1. 根据调用进程的系统用户、容器实例和 `orca-broker` 持有的令牌，从 `gov` 反查绑定到该容器实例的当前认领或评审（含等待接受的状态），取得任务、终端、Dispatch 和角色。Agent 传入的 worker 注入指令和身份字段一律不作为授权输入。
 2. 向 `gov` 提交规范化后的动作和参数，取得一次授权编号。
-3. 对 `gov` 动作，只允许当前角色在 §9.1 中可用的任务接口：执行 Session 的 `task accept`、`submit`、`split`、`rebase`、`status`，以及评审 Session 的 `review accept`、`review submit`、`status`。`declare`、`claim` 和人工恢复接口不在任务或评审环境开放。
+3. 对 `gov` 动作，只允许当前角色在 §9.1 中可用的任务接口：执行 Session 的 `task accept`、`submit`、`fail`、`split`、`rebase`、`review request`、`status`，以及评审 Session 的 `review accept`、`review submit`、`status`。`declare`、`claim` 和人工恢复接口不在任务或评审环境开放。
 4. 对 `gov` 动作，启动器将请求交给 `gov` 执行并返回结果，不启动 Orca CLI，也不增加第二个 sudo 入口。
 5. 对 Orca 动作，仅允许 `status --json` 的受限身份读取，以及当前 Dispatch 的 `orchestration check`、`ask`、`reply`、`send`。启动器在 worker 原终端中启动真实 Orca CLI，使用 `gov` 返回的原始终端和 Dispatch 参数，使 Orca 继续按原 worker 解析身份来源。真实 CLI 的工作目录固定为 broker 专用的空目录，不读取任务仓库配置、任务内 Node 模块或 Agent 环境变量；worker 注入指令只用于核对显示，不参与授权。
 6. 将 `gov` 或真实 CLI 的退出码和结构化结果原样返回，并写入不含凭据的回执。
@@ -500,6 +511,7 @@ stateDiagram-v2
 11. 任务执行 Session 需要替换时：取得旧 writer 已退出的明确证据 → `gov` 调用 `worker-stop` 结算旧 Dispatch（结果不确定时取得正面证明后用 `worker-abandon`）→ 旧认领标记为 `FENCED` 并撤销令牌 → 以 `worker-start --retry-of` 重派。新 Dispatch 接受后才能写入；旧提交和评审不能直接转移给新认领。
 12. 父任务有活动子任务时不允许替换父认领，先处理子任务，避免子任务继续指向旧父版本。
 13. 人工验收回执、`worker-stop` / `worker-abandon` / `retry-of` 回执与资源销毁回执均写入操作记录，与外部操作状态一并恢复。
+14. 任务在 REVIEW_REQUESTED 状态替换执行者时：结算旧 Dispatch → 任务回到 ACTIVE → 旧提交作废 → 新执行者在保留的工作区上重新提交。
 
 ## 14. 测试与发布标准
 
