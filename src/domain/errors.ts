@@ -46,6 +46,16 @@ export const GOV_ERROR_CODES = [
   'E_CLAIM_UNCERTAIN',
   'E_CLAIM_RETRY_EXHAUSTED',
   'E_CLAIM_STATE_INVALID',
+  // T3.2 提交/评审服务层：提交状态非法、评审身份禁止、评审 tree 改动、人工回执
+  // 无效、补证据重送非法、轮数预算耗尽、退回恢复工作区分叉与无可用评审者。
+  'E_SUBMIT_INVALID',
+  'E_REVIEW_FORBIDDEN',
+  'E_REVIEW_TREE_CHANGED',
+  'E_MANUAL_RECEIPT_INVALID',
+  'E_REVIEW_REQUEST_INVALID',
+  'E_BUDGET_EXCEEDED',
+  'E_WORKSPACE_DIVERGED',
+  'E_NO_REVIEWER',
 ] as const;
 
 export type GovErrorCode = (typeof GOV_ERROR_CODES)[number];

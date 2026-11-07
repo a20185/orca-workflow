@@ -17,6 +17,8 @@ import type {
   createEnvironmentAdapter,
   CreateReceipt,
   DestroyReceipt,
+  ResumeReceipt,
+  SuspendReceipt,
   SwitchReceipt,
 } from '../adapters/environment.ts';
 import { GovError } from '../domain/errors.ts';
@@ -114,3 +116,66 @@ const _envAdapterIsPortable: EnvPort = undefined as unknown as ReturnType<
 void _orcaAdapterIsPortable;
 void _jjAdapterIsPortable;
 void _envAdapterIsPortable;
+
+// ---------------------------------------------------------------------------
+// T3.2 扩展端口：提交/评审/rebase 服务额外依赖的版本操作、环境暂停恢复与
+// 定向消息面。以「extends 基础端口」的方式新增，而不是改基础端口——T3.1 的
+// 假适配器（test/unit/claims）只需满足基础端口即可继续编译。
+// ---------------------------------------------------------------------------
+
+/**
+ * jj 版本操作端口（T2.2 适配器子集）：提交锚定与路径核验（snapshot/diffPaths/
+ * conflictList/bookmarkCurrent）与 rebase。签名与真实适配器逐字同形。
+ */
+export interface JjVersionPort extends JjPort {
+  snapshot(dir?: string | undefined): Promise<{
+    ok: true;
+    commitId: string;
+    treeId: string;
+    opIds: string[];
+  }>;
+  diffPaths(
+    rev: string,
+    ownedPaths: readonly string[],
+  ): Promise<{ ok: true; paths: string[] }>;
+  conflictList(rev: string): Promise<{ ok: true; conflicts: string[] }>;
+  bookmarkCurrent(bookmark: string): Promise<{ ok: true; commitId: string }>;
+  rebase(input: {
+    readonly rev: string;
+    readonly newBase: string;
+  }): Promise<{ ok: true; newCommitId: string; conflicts: string[]; opIds: string[] }>;
+}
+
+/** 环境生命周期扩展端口：开发环境暂停（进评审）/恢复（退回继续开发）。 */
+export interface EnvLifecyclePort extends EnvPort {
+  suspend(envId: string): Promise<SuspendReceipt>;
+  resume(envId: string): Promise<ResumeReceipt>;
+}
+
+/**
+ * Orca 消息与结算扩展端口：workerStop 用于评审者换人时停掉被拒候选的派工；
+ * sendToDispatch 用于退回意见定向送达执行者。type 白名单在适配器侧强制。
+ */
+export interface OrcaMessagingPort extends OrcaPort {
+  workerStop(dispatch: string): Promise<{ ok: true; raw: unknown }>;
+  sendToDispatch(input: {
+    readonly dispatch: string;
+    readonly type: 'status' | 'merge_ready' | 'question';
+    readonly subject: string;
+    readonly body: string;
+    readonly filesModified?: readonly string[] | undefined;
+  }): Promise<{ ok: true; raw: unknown }>;
+}
+
+const _jjVersionAdapterIsPortable: JjVersionPort = undefined as unknown as ReturnType<
+  typeof createJjAdapter
+>;
+const _envLifecycleAdapterIsPortable: EnvLifecyclePort = undefined as unknown as ReturnType<
+  typeof createEnvironmentAdapter
+>;
+const _orcaMessagingAdapterIsPortable: OrcaMessagingPort = undefined as unknown as ReturnType<
+  typeof createOrcaAdapter
+>;
+void _jjVersionAdapterIsPortable;
+void _envLifecycleAdapterIsPortable;
+void _orcaMessagingAdapterIsPortable;

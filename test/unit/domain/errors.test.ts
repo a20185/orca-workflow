@@ -2,7 +2,7 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { GOV_ERROR_CODES, GovError } from '../../../src/domain/errors.ts';
 
-test('GOV_ERROR_CODES 恰为契约约定的全部错误码（T1.1 九码 + T1.3 九码 + T2.1 Orca 四码 + T2.2 jj 七码 + T2.3 环境五码 + T3.1 认领五码）', () => {
+test('GOV_ERROR_CODES 恰为契约约定的全部错误码（T1.1 九码 + T1.3 九码 + T2.1 Orca 四码 + T2.2 jj 七码 + T2.3 环境五码 + T3.1 认领五码 + T3.2 评审八码）', () => {
   assert.deepEqual(GOV_ERROR_CODES, [
     'E_CONFIG_INVALID',
     'E_SPEC_INVALID',
@@ -43,6 +43,14 @@ test('GOV_ERROR_CODES 恰为契约约定的全部错误码（T1.1 九码 + T1.3 
     'E_CLAIM_UNCERTAIN',
     'E_CLAIM_RETRY_EXHAUSTED',
     'E_CLAIM_STATE_INVALID',
+    'E_SUBMIT_INVALID',
+    'E_REVIEW_FORBIDDEN',
+    'E_REVIEW_TREE_CHANGED',
+    'E_MANUAL_RECEIPT_INVALID',
+    'E_REVIEW_REQUEST_INVALID',
+    'E_BUDGET_EXCEEDED',
+    'E_WORKSPACE_DIVERGED',
+    'E_NO_REVIEWER',
   ]);
 });
 

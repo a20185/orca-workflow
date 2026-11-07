@@ -21,6 +21,19 @@ import {
   createClaimHandler,
   type ClaimHandlersDeps,
 } from './services/claims.ts';
+import {
+  createCancelHandler,
+  createFailHandler,
+  createSubmitHandler,
+} from './services/submissions.ts';
+import { createRebaseHandler } from './services/rebases.ts';
+import { createManualApproveHandler } from './services/evidence.ts';
+import {
+  createReviewAcceptHandler,
+  createReviewRequestHandler,
+  createReviewSubmitHandler,
+} from './services/reviews.ts';
+import type { EnvLifecyclePort, JjVersionPort, OrcaMessagingPort } from './services/ports.ts';
 
 export interface ActionContext {
   readonly db: DatabaseSync;
@@ -260,6 +273,17 @@ export interface CoreHandlerDeps {
   readonly configPath: string;
   /** T3.1 声明/认领/接受的端口依赖；注入后三个 handler 才注册（真实适配器注入归 T6.x）。 */
   readonly claimDeps?: ClaimHandlersDeps | undefined;
+  /**
+   * T3.2 提交/评审/rebase/证据的端口依赖（扩展端口：jj 版本操作、环境暂停
+   * 恢复、Orca 消息与结算）；注入后相应 handler 才注册。onMergeReady 是编排
+   * 轮询的内部调用，不经 API 面；split 归 T4.x，保持未注册。
+   */
+  readonly reviewDeps?: {
+    readonly orca: OrcaMessagingPort;
+    readonly jj: JjVersionPort;
+    readonly env: EnvLifecyclePort;
+    readonly stepTimeoutMs?: number | undefined;
+  } | undefined;
 }
 
 /** 注册 T1.3 的三个真实现；其余动作保持未注册（E_ACTION_UNIMPLEMENTED）。 */
@@ -271,5 +295,26 @@ export function registerCoreHandlers(registry: HandlerRegistry, deps: CoreHandle
     registry.registerHandler('declare', createDeclareHandler(deps.claimDeps));
     registry.registerHandler('claim', createClaimHandler(deps.claimDeps));
     registry.registerHandler('accept', createAcceptHandler(deps.claimDeps));
+  }
+  if (deps.reviewDeps !== undefined) {
+    const rd = deps.reviewDeps;
+    const timeoutOpts = rd.stepTimeoutMs !== undefined ? { stepTimeoutMs: rd.stepTimeoutMs } : {};
+    registry.registerHandler('submit', createSubmitHandler({ config: deps.config, jj: rd.jj, ...timeoutOpts }));
+    registry.registerHandler('fail', createFailHandler({ config: deps.config, jj: rd.jj, ...timeoutOpts }));
+    registry.registerHandler('cancel', createCancelHandler({ config: deps.config, jj: rd.jj, ...timeoutOpts }));
+    registry.registerHandler('rebase', createRebaseHandler({ config: deps.config, jj: rd.jj, ...timeoutOpts }));
+    registry.registerHandler(
+      'review-request',
+      createReviewRequestHandler({ config: deps.config, orca: rd.orca, jj: rd.jj, env: rd.env, ...timeoutOpts }),
+    );
+    registry.registerHandler(
+      'review-accept',
+      createReviewAcceptHandler({ config: deps.config, orca: rd.orca, jj: rd.jj, env: rd.env, ...timeoutOpts }),
+    );
+    registry.registerHandler(
+      'review-submit',
+      createReviewSubmitHandler({ config: deps.config, orca: rd.orca, jj: rd.jj, env: rd.env, ...timeoutOpts }),
+    );
+    registry.registerHandler('manual-approve', createManualApproveHandler());
   }
 }
