@@ -27,6 +27,7 @@ Orca 已提供独立 Session、定向消息、Task/Dispatch、执行尝试失效
 8. 本机未找到 Nix 命令。现有 `orca-dev-workflow` 只有 runbook 和历史问题报告，没有既有实现。
 9. T0.2 探针（2026-11-07）：纯 jj 目录经 `repo add` 被拒（`Not a valid git repository`）；`project setup-existing-folder` 通道在 1.4.238 无可用的新文件夹建档命令，现存 folder project 均为旧版遗留。结论：纯 jj 工作区不可行，改用 colocated jj（D21）。
 10. T0.3 探针（2026-11-07）：注入 preamble 的五条命令行均为裸命令名 `orca`，PATH 垫片可拦截；垫片转发后服务端按原终端与 dispatch capability 认定身份，宿主以 worker 名义代发 3/3 被 `consumer_fenced`。`orchestration reset --messages` 无 run 范围（误清历史消息，快照存档于 `execution/orchestration-wal-snapshot-2026-11-07.db-wal`，本系统禁用该命令）。未预信任工作区的首个 worker 必死于信任门，恢复配方为宿主接受信任一次 + `--retry-of` 重派。
+11. T0.2b 探针（2026-11-07）：colocated jj 仓全链通过（注册 kind=git、无 prompt 启动、jj/git 双面一致、注销后回基准），T2.3 解锁。三个适配口径：`path:` 选择器在 macOS 上须用符号链接归一化形态（`/tmp` → `/private/tmp`），否则 `repo_not_found`；经 `repo add` 注册的仓根注销走 `project setup-delete --force`，`worktree rm` 仅适用 Orca 自建工作树（对注册仓根报 protected main worktree）；未预置信任的终端停在信任确认框不干活（与 T0.3 印证）。
 
 ### 1.2 官方文档约束
 
@@ -382,7 +383,7 @@ stateDiagram-v2
 | 被替代任务的全部资源 | SUPERSEDED 迁移与归档完成后；在飞的评审同时取消并销毁 |
 | 正常路径资源 | 按 §8.4：合并确认、写入者退出、归档完成后 |
 
-清理失败进入 `cleanup_pending`，不改变已确认的结算或合并事实。清理回执按资源记录，可与外部操作状态分别重试。
+清理失败进入 `cleanup_pending`，不改变已确认的结算或合并事实。清理回执按资源记录，可与外部操作状态分别重试。注销动词口径：经 `repo add` 注册的仓根用 `project setup-delete --force`；`worktree rm` 仅用于 Orca 自建工作树。
 
 ## 9. 对外接口
 

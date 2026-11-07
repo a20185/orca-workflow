@@ -228,7 +228,7 @@ W1 的三路并行只在临时资源充足时执行；探针共享 Orca 或 Dock
 
 - **Files**：创建 `src/adapters/orca.ts` 和 `test/integration/orca/`。
 - **Inputs**：T0.2/T0.3 证据；当前 Orca JSON 输出；T1.1 领域类型。
-- **Outputs**：版本与能力检查、Task/Session/Dispatch 创建和查询、定向消息、受限搜索结果与分页读取、`run-use` 协调恢复、`worker-read` 有界读取、release、`worker-stop` / `worker-abandon` 结算、`worker-start --retry-of` 重派、worktree 删除、统一回执和 Orca `doctor` 检查。
+- **Outputs**：版本与能力检查、Task/Session/Dispatch 创建和查询、定向消息、受限搜索结果与分页读取、`run-use` 协调恢复、`worker-read` 有界读取、release、`worker-stop` / `worker-abandon` 结算、`worker-start --retry-of` 重派、worktree 删除、注册仓根注销（`project setup-delete`）、路径符号链接归一化（macOS `/tmp` ↔ `/private/tmp`）、统一回执和 Orca `doctor` 检查。
 - **Accept rule**：同一 Run 使用同一 Orca executable；所有 JSON 经结构校验；失败保留 `failedStage`、`residualResources` 和安全错误码；正常路径不调用 `task-update`；Session 读取默认有数量和范围上限。
 - **Verification gate**：真实 Orca 临时 Run 覆盖启动、重复启动拒绝、终端不匹配、定向消息、搜索/分页读取、新协调 Session `run-use` 恢复、`worker-read` 边界、`worker-stop` 结算与 `retry-of` 重派、结果不确定、doctor 和清理。
 
