@@ -9,7 +9,7 @@ export const commandCriterionSchema = z.strictObject({
   type: z.literal('command'),
   criterionId: z.string().min(1),
   config: z.strictObject({
-    command: z.array(z.string()),
+    command: z.array(z.string()).min(1),
     cwd: z.literal('review-workspace'),
     expectedExit: z.literal(0),
   }),
@@ -18,13 +18,17 @@ export const commandCriterionSchema = z.strictObject({
 export const artifactCriterionSchema = z.strictObject({
   type: z.literal('artifact'),
   criterionId: z.string().min(1),
-  config: z.strictObject({
-    // 仓库相对路径的形状（绝对路径、.. 段、空段）在 parseTaskSpec 统一拒绝，
-    // 这里只保证非空字符串。
-    path: z.string().min(1),
-    minBytes: z.number().int().min(1),
-    maxBytes: z.number().int(),
-  }),
+  config: z
+    .strictObject({
+      // 仓库相对路径的形状（绝对路径、.. 段、空段）在 parseTaskSpec 统一拒绝，
+      // 这里只保证非空字符串。
+      path: z.string().min(1),
+      minBytes: z.number().int().min(1),
+      maxBytes: z.number().int(),
+    })
+    .refine((c) => c.maxBytes >= 1 && c.maxBytes >= c.minBytes, {
+      message: 'maxBytes 必须 >= 1 且不得低于 minBytes',
+    }),
 });
 
 export const manualCriterionSchema = z.strictObject({

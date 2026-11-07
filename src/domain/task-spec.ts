@@ -8,11 +8,22 @@ const nonEmptyText = z.string().min(1);
 const gtTaskId = nonEmptyText.regex(/^gt-.+$/);
 const baseCommitId = nonEmptyText.regex(/^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/);
 
-export const taskTargetSchema = z.strictObject({
-  kind: z.enum(['top-level', 'parent-claim']),
-  bookmark: nonEmptyText.optional(),
-  parentClaimId: nonEmptyText.optional(),
-});
+/**
+ * 目标为 kind 判别联合：top-level 必填 bookmark、出现 parentClaimId 即拒；
+ * parent-claim 必填 gt- 前缀的 parentClaimId、出现 bookmark 即拒。分支内
+ * 其余键由 strict 直接拒收；bookmark 是否属于 repo.targets 由 parseTaskSpec
+ * 结合配置校验。
+ */
+export const taskTargetSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('top-level'),
+    bookmark: nonEmptyText,
+  }),
+  z.strictObject({
+    kind: z.literal('parent-claim'),
+    parentClaimId: gtTaskId,
+  }),
+]);
 
 export const taskSpecSchema = z.strictObject({
   schemaVersion: z.literal(1),
@@ -54,10 +65,11 @@ export function isRepoRelativePath(p: string): boolean {
 }
 
 /**
- * 解析并校验任务书。结构/格式问题抛 E_SPEC_INVALID；跨字段约束使用各自的
- * 专属错误码，供上游按码分诊：路径逃逸 E_PATH_OUT_OF_SCOPE、仓库未配置
- * E_REPO_NOT_CONFIGURED、目标非法 E_TARGET_INVALID、criterionId 重复
- * E_CRITERIA_INVALID。repoId/target 的校验依赖调用方传入的 GovConfig。
+ * 解析并校验任务书。结构/格式问题（含 target 各分支的字段配置）抛
+ * E_SPEC_INVALID；跨字段约束使用各自的专属错误码，供上游按码分诊：路径逃逸
+ * E_PATH_OUT_OF_SCOPE、仓库未配置 E_REPO_NOT_CONFIGURED、bookmark 不属于
+ * repo.targets 时 E_TARGET_INVALID、criterionId 重复 E_CRITERIA_INVALID。
+ * repoId/target 的校验依赖调用方传入的 GovConfig。
  */
 export function parseTaskSpec(input: unknown, config: GovConfig): TaskSpec {
   const parsed = taskSpecSchema.safeParse(input);
@@ -85,16 +97,11 @@ export function parseTaskSpec(input: unknown, config: GovConfig): TaskSpec {
     throw new GovError('E_REPO_NOT_CONFIGURED', `repoId 未在 GovConfig.repos 中配置: ${spec.repoId}`);
   }
 
-  if (spec.target.kind === 'top-level') {
-    const bookmark = spec.target.bookmark;
-    if (bookmark === undefined || !repo.targets.includes(bookmark)) {
-      throw new GovError(
-        'E_TARGET_INVALID',
-        `top-level 目标缺 bookmark 或 bookmark 不在 repo.targets 中: ${bookmark ?? '(缺失)'}`,
-      );
-    }
-  } else if (spec.target.parentClaimId === undefined) {
-    throw new GovError('E_TARGET_INVALID', 'parent-claim 目标缺 parentClaimId');
+  if (spec.target.kind === 'top-level' && !repo.targets.includes(spec.target.bookmark)) {
+    throw new GovError(
+      'E_TARGET_INVALID',
+      `top-level bookmark 不在 repo.targets 中: ${spec.target.bookmark}`,
+    );
   }
 
   const seenCriterionIds = new Set<string>();

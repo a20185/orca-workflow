@@ -122,9 +122,18 @@ test('repoId 未在 GovConfig.repos 配置被拒（E_REPO_NOT_CONFIGURED）', ()
   );
 });
 
-test('top-level 目标缺 bookmark 被拒（E_TARGET_INVALID）', () => {
-  expectCode('E_TARGET_INVALID', () =>
+test('top-level 目标缺 bookmark 被拒（判别联合结构错误）', () => {
+  expectCode('E_SPEC_INVALID', () =>
     parseTaskSpec({ ...validSpec(), target: { kind: 'top-level' } }, config),
+  );
+});
+
+test('top-level 目标出现 parentClaimId 即拒', () => {
+  expectCode('E_SPEC_INVALID', () =>
+    parseTaskSpec(
+      { ...validSpec(), target: { kind: 'top-level', bookmark: 'main', parentClaimId: 'gt-0002' } },
+      config,
+    ),
   );
 });
 
@@ -136,21 +145,32 @@ test('top-level bookmark 不在 repo.targets 被拒（E_TARGET_INVALID）', () =
 
 test('top-level bookmark 命中 repo.targets 通过', () => {
   const spec = parseTaskSpec({ ...validSpec(), target: { kind: 'top-level', bookmark: 'feat-x' } }, config);
+  assert.ok(spec.target.kind === 'top-level');
   assert.equal(spec.target.bookmark, 'feat-x');
 });
 
-test('parent-claim 缺 parentClaimId 被拒（E_TARGET_INVALID）', () => {
-  expectCode('E_TARGET_INVALID', () =>
+test('parent-claim 缺 parentClaimId、带 bookmark、前缀不符均被拒', () => {
+  expectCode('E_SPEC_INVALID', () =>
     parseTaskSpec({ ...validSpec(), target: { kind: 'parent-claim' } }, config),
+  );
+  expectCode('E_SPEC_INVALID', () =>
+    parseTaskSpec(
+      { ...validSpec(), target: { kind: 'parent-claim', parentClaimId: 'gt-0002', bookmark: 'main' } },
+      config,
+    ),
+  );
+  expectCode('E_SPEC_INVALID', () =>
+    parseTaskSpec({ ...validSpec(), target: { kind: 'parent-claim', parentClaimId: 'gc-0042' } }, config),
   );
 });
 
-test('parent-claim 携带 parentClaimId 通过', () => {
+test('parent-claim 携带 gt- 前缀 parentClaimId 通过', () => {
   const spec = parseTaskSpec(
-    { ...validSpec(), target: { kind: 'parent-claim', parentClaimId: 'gc-0042' } },
+    { ...validSpec(), target: { kind: 'parent-claim', parentClaimId: 'gt-0042' } },
     config,
   );
-  assert.equal(spec.target.parentClaimId, 'gc-0042');
+  assert.ok(spec.target.kind === 'parent-claim');
+  assert.equal(spec.target.parentClaimId, 'gt-0042');
 });
 
 test('criterionId 重复被拒（E_CRITERIA_INVALID）', () => {

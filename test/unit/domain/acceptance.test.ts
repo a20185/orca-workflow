@@ -32,6 +32,17 @@ test('command 标准合法形态通过，cwd/expectedExit 候选外被拒', () =
   );
 });
 
+test('command 标准的空命令数组被拒', () => {
+  assert.equal(
+    acceptanceCriterionSchema.safeParse({
+      type: 'command',
+      criterionId: 'ac-cmd',
+      config: { command: [], cwd: 'review-workspace', expectedExit: 0 },
+    }).success,
+    false,
+  );
+});
+
 test('artifact 标准的 minBytes >= 1、maxBytes 整数、path 非空', () => {
   assert.equal(
     artifactCriterionSchema.safeParse({
@@ -56,6 +67,31 @@ test('artifact 标准的 minBytes >= 1、maxBytes 整数、path 非空', () => {
       config: { path: 'out/r.md', minBytes: 1, maxBytes: 1.5 },
     }).success,
     false,
+  );
+  // maxBytes 下界及与 minBytes 的交叉校验
+  assert.equal(
+    artifactCriterionSchema.safeParse({
+      type: 'artifact',
+      criterionId: 'ac-a',
+      config: { path: 'out/r.md', minBytes: 10, maxBytes: 0 },
+    }).success,
+    false,
+  );
+  assert.equal(
+    artifactCriterionSchema.safeParse({
+      type: 'artifact',
+      criterionId: 'ac-a',
+      config: { path: 'out/r.md', minBytes: 100, maxBytes: 99 },
+    }).success,
+    false,
+  );
+  assert.equal(
+    artifactCriterionSchema.safeParse({
+      type: 'artifact',
+      criterionId: 'ac-a',
+      config: { path: 'out/r.md', minBytes: 100, maxBytes: 100 },
+    }).success,
+    true,
   );
 });
 

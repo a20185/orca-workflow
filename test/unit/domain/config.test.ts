@@ -88,6 +88,13 @@ test('loadConfig：空 repoId / 空 targets / 重复 targets 抛 E_CONFIG_INVALI
   }
 });
 
+test('loadConfig：空 repos 清单抛 E_CONFIG_INVALID', async () => {
+  const bad = { ...validConfigJson, repos: [] };
+  await withTempConfig(JSON.stringify(bad), async (path) => {
+    await expectConfigError(path);
+  });
+});
+
 test('loadConfig：schemaVersion 非 1 抛 E_CONFIG_INVALID', async () => {
   const bad = { ...validConfigJson, schemaVersion: 2 };
   await withTempConfig(JSON.stringify(bad), async (path) => {

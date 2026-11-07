@@ -23,7 +23,8 @@ export const repoConfigSchema = z.strictObject({
 
 export const govConfigSchema = z.strictObject({
   schemaVersion: z.literal(1),
-  repos: z.array(repoConfigSchema),
+  // 空仓清单没有可治理对象，视为配置错误而非合法空态。
+  repos: z.array(repoConfigSchema).min(1),
 });
 
 export type RepoConfig = z.infer<typeof repoConfigSchema>;
