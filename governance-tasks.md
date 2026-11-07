@@ -306,9 +306,9 @@ W1 的三路并行只在临时资源充足时执行；探针共享 Orca 或 Dock
 
 - **Files**：创建 `deploy/docker/`、`deploy/README.md` 和 `test/isolation/environment/`。
 - **Inputs**：T0.4 权限配置；T2.3 环境生命周期；T5.1 启动器。
-- **Outputs**：非 root Agent、broker 用户、受控挂载、元数据权限、控制通道、CPU/内存/进程/磁盘限制。
+- **Outputs**：非 root Agent、broker 用户、受控挂载、`.jj`/`.git` 遮蔽挂载（tmpfs mask，读保护不依赖 DAC）、元数据权限、控制通道、CPU/内存/进程/磁盘限制、符号链接审计清单。
 - **Accept rule**：环境不可用时拒绝启动；无宿主凭据、Docker socket 和其他任务路径；容器不以 privileged 运行，Agent 不持有 Linux capabilities；资源耗尽不影响其他任务。
-- **Verification gate**：设计 §14.2 全部隔离用例通过；destroy 后容器、挂载、令牌和临时目录无残留。
+- **Verification gate**：设计 §14.2 全部隔离用例通过（含读侧：`cat .jj`/`cat .git` 被遮蔽拒绝，2026-11-07 T0.4 实证 DAC 不可依赖）；destroy 后容器、挂载、令牌、临时目录与容器所建符号链接无残留；部署面迁移到 Linux 前重跑 T0.4。
 
 ### T5.3 编写角色提示词与防御性 hooks
 

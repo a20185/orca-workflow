@@ -28,6 +28,7 @@ Orca 已提供独立 Session、定向消息、Task/Dispatch、执行尝试失效
 9. T0.2 探针（2026-11-07）：纯 jj 目录经 `repo add` 被拒（`Not a valid git repository`）；`project setup-existing-folder` 通道在 1.4.238 无可用的新文件夹建档命令，现存 folder project 均为旧版遗留。结论：纯 jj 工作区不可行，改用 colocated jj（D21）。
 10. T0.3 探针（2026-11-07）：注入 preamble 的五条命令行均为裸命令名 `orca`，PATH 垫片可拦截；垫片转发后服务端按原终端与 dispatch capability 认定身份，宿主以 worker 名义代发 3/3 被 `consumer_fenced`。`orchestration reset --messages` 无 run 范围（误清历史消息，快照存档于 `execution/orchestration-wal-snapshot-2026-11-07.db-wal`，本系统禁用该命令）。未预信任工作区的首个 worker 必死于信任门，恢复配方为宿主接受信任一次 + `--retry-of` 重派。
 11. T0.2b 探针（2026-11-07）：colocated jj 仓全链通过（注册 kind=git、无 prompt 启动、jj/git 双面一致、注销后回基准），T2.3 解锁。三个适配口径：`path:` 选择器在 macOS 上须用符号链接归一化形态（`/tmp` → `/private/tmp`），否则 `repo_not_found`；经 `repo add` 注册的仓根注销走 `project setup-delete --force`，`worktree rm` 仅适用 Orca 自建工作树（对注册仓根报 protected main worktree）；未预置信任的终端停在信任确认框不干活（与 T0.3 印证）。
+12. T0.4 探针（2026-11-07）：双层挂载对 `.jj`/`.git` 的写保护成立（shell/Python/Node 三面统一 EROFS，改名/删除/写穿符号链接全拒），宿主 jj snapshot 正常。读保护被证伪：Docker Desktop macOS 的挂载架空宿主 chmod DAC，容器可读 `.jj`/`.git`——读保护改由遮蔽挂载提供（§11.1.4 已修订）。容器可合法创建的符号链接会进入宿主 snapshot，须列入产物审计。结论限定 Docker Desktop macOS；Linux 原生 bind mount 行为可能不同，部署面迁移前重跑本探针。
 
 ### 1.2 官方文档约束
 
@@ -459,11 +460,11 @@ stateDiagram-v2
 1. 使用本地 Docker SSH-mode，宿主 Orca 通过 SSH 管理终端，容器内不运行 Orca server。
 2. 容器只挂载本任务目录和受限控制通道，使用非 root 用户运行 Agent。环境 suspend/resume 必须保留容器和进程状态，不能通过销毁重建模拟暂停。
 3. 真实 Orca CLI、配对信息和受限启动器由 root 或 `orca-broker` 用户持有；`sudoers` 只允许 Agent 调用固定启动器，且禁止环境变量继承和参数中的 shell 展开。镜像移除其他不需要的 setuid/setgid 可执行文件，sudo 配置只存在于测试容器，不修改宿主配置。
-4. `.jj`、`.git` 在容器内由 root 持有，宿主 `gov` 独占 jj 操作；任务用户不能读取、修改、重命名或删除这些目录。
+4. `.jj`、`.git` 的写保护由双层挂载提供（工作区根只读 + 任务路径读写，2026-11-07 实证 EROFS 全拒）；读保护由遮蔽挂载提供（空 tmpfs 覆盖 `/work/.jj` 与 `/work/.git`，读取返回不存在）——不得依赖宿主 chmod，Docker Desktop macOS 上 DAC 会被架空。宿主 `gov` 独占 jj 操作。
 5. 宿主不挂载 Docker socket、个人配置目录、版本管理凭据或其他任务目录。
 6. 每个容器配置 CPU、内存、进程数和磁盘上限；全局构建并发单独限制。
 7. 控制通道只允许访问 `gov` 的任务 API，不允许 Agent 直接访问通用 Orca 管理接口。
-8. 文件路径、符号链接、归档大小和输出大小都在边界检查。
+8. 文件路径、符号链接、归档大小和输出大小都在边界检查；容器内任务用户创建的符号链接是合法产物但必须列入审计与清理清单（读穿可行、写穿必拒，2026-11-07 实证）。
 
 ### 11.2 并行预算
 
@@ -537,7 +538,7 @@ stateDiagram-v2
 ### 14.2 隔离测试
 
 1. 直接运行、绝对路径运行以及经 Python/Node 间接运行 git/jj，都不能修改仓库。
-2. 直接写、重命名或删除 `.jj` / `.git` 都失败。
+2. 直接写、重命名或删除 `.jj` / `.git` 都失败；读取 `.jj` / `.git` 被遮蔽挂载拒绝（Docker Desktop macOS 的 DAC 不可依赖）。
 3. 写其他任务目录、宿主机目录和 Docker socket 都失败。
 4. 调用通用 Orca 管理命令、组消息、伪造 Dispatch、伪造 worker 注入指令和越权 `gov` 动作都失败；其他 setuid/setgid 路径不能取得 broker 或 root 权限。
 5. 提前 `worker_done` 被拦截，开发提交只能发送 `merge_ready`。
