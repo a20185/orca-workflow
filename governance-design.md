@@ -26,6 +26,7 @@ Orca 已提供独立 Session、定向消息、Task/Dispatch、执行尝试失效
 7. Node.js 24.15.0 的 `node:sqlite` 和 `node:util.parseArgs` 已在本机通过探针；jj 0.41.0 与 Docker 29.6.1 可用。
 8. 本机未找到 Nix 命令。现有 `orca-dev-workflow` 只有 runbook 和历史问题报告，没有既有实现。
 9. T0.2 探针（2026-11-07）：纯 jj 目录经 `repo add` 被拒（`Not a valid git repository`）；`project setup-existing-folder` 通道在 1.4.238 无可用的新文件夹建档命令，现存 folder project 均为旧版遗留。结论：纯 jj 工作区不可行，改用 colocated jj（D21）。
+10. T0.3 探针（2026-11-07）：注入 preamble 的五条命令行均为裸命令名 `orca`，PATH 垫片可拦截；垫片转发后服务端按原终端与 dispatch capability 认定身份，宿主以 worker 名义代发 3/3 被 `consumer_fenced`。`orchestration reset --messages` 无 run 范围（误清历史消息，快照存档于 `execution/orchestration-wal-snapshot-2026-11-07.db-wal`，本系统禁用该命令）。未预信任工作区的首个 worker 必死于信任门，恢复配方为宿主接受信任一次 + `--retry-of` 重派。
 
 ### 1.2 官方文档约束
 
@@ -309,7 +310,7 @@ stateDiagram-v2
 2. `gov` 创建不可变任务书和可分派的 Orca Task，记录声明者身份。父子依赖保存在治理数据库；只有依赖已满足的 Task 才进入 Orca，不使用 `task-update` 手工推进。
 3. 协调 Session 请求创建执行 Session。数据库先保留认领，防止并发重复创建。
 4. `gov` 创建 jj workspace 和任务环境，记录每一步回执。
-5. `gov` 通过 Orca 启动监督式 worker，取得 Dispatch、终端和 Session 身份。
+5. `gov` 通过 Orca 启动监督式 worker，取得 Dispatch、终端和 Session 身份。启动前预置工作区信任；首个 worker 因信任门死亡时，先在宿主接受信任，再以 `--retry-of` 重派（普通重启会被 `task_not_startable` 拒绝）。
 6. 执行 Session 阅读任务书并调用 `accept`。`gov` 核对 Dispatch 后激活认领。
 7. 任一步骤失败时，保留操作记录和残余资源信息；没有查明前不允许第二次认领。
 
@@ -512,6 +513,7 @@ stateDiagram-v2
 12. 父任务有活动子任务时不允许替换父认领，先处理子任务，避免子任务继续指向旧父版本。
 13. 人工验收回执、`worker-stop` / `worker-abandon` / `retry-of` 回执与资源销毁回执均写入操作记录，与外部操作状态一并恢复。
 14. 任务在 REVIEW_REQUESTED 状态替换执行者时：结算旧执行 Dispatch，取消并结算未开始的评审 Dispatch、销毁评审资源 → 任务回到 ACTIVE → 旧提交作废 → 新执行者在保留的工作区上重新提交。该状态下执行环境处于暂停，业务失败改由人工取消路径处理。
+15. 禁止调用 `orchestration reset`：该命令无 run 范围，会清空全部 Run 的消息（2026-11-07 实证）；如需修复编排态，仅限人工持快照操作并先行评估影响面。
 
 ## 14. 测试与发布标准
 
@@ -557,7 +559,7 @@ stateDiagram-v2
 以下三项属于实施阻塞项，不能用提示词或未验证假设代替：
 
 1. ~~纯 jj 目录能否注册为 Orca folder workspace~~ 已验证：两注册入口皆败（`probes/orca-jj-folder.md`），按 D21 改用 colocated jj；替代验证为 T0.2b（colocated 仓的注册、启动与删除）。
-2. Orca worker 注入的 executable 能否指向任务环境内的受限启动器；真实 CLI 经独立用户启动后能否保留原 worker 的 Dispatch 身份来源。
+2. 已验证（2026-11-07，`probes/orca-guard-provenance.md`）：preamble 为裸命令名，PATH 垫片可拦截，转发后服务端仍按原 worker 终端与 dispatch capability 认定身份，宿主代发被拒；容器内独立用户与 sudo 部分由 T0.4 与 T5.1 承接。
 3. Docker 内非 root 任务用户能否在正常工作目录写入文件的同时，被阻止修改、重命名和删除 `.jj` / `.git`。
 
 任一验证失败时，停止受控版本的后续实施，记录最小复现并修改对应平台能力。宿主直接运行通用 CLI 的模式只能用于开发测试，不能作为失败时的受控替代方案。

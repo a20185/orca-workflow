@@ -254,8 +254,8 @@ W1 的三路并行只在临时资源充足时执行；探针共享 Orca 或 Dock
 
 - **Files**：创建 `src/services/tasks.ts`、`claims.ts`、`workspaces.ts` 和 `test/unit/claims/`。
 - **Inputs**：T1.1–T2.3 的输出；设计 §8.1。
-- **Outputs**：任务声明、认领保留、环境准备、Dispatch 绑定、执行者接受和完整回执。
-- **Accept rule**：只有执行者 `accept` 后才允许开发；认领激活前工作区保持只读，accept 触发写权限切换，切换失败回退并转人工；准备中或结果不确定也阻止第二认领；任何历史认领均可查询。
+- **Outputs**：任务声明、认领保留、环境准备、工作区信任预置、Dispatch 绑定、执行者接受和完整回执。
+- **Accept rule**：只有执行者 `accept` 后才允许开发；认领激活前工作区保持只读，accept 触发写权限切换，切换失败回退并转人工；worker 启动前完成工作区信任预置，信任门首死按「UI 信任一次 + retry-of 重派」恢复，不盲重试；准备中或结果不确定也阻止第二认领；任何历史认领均可查询。
 - **Verification gate**：两个并发请求只产生一个有效执行环境；接受前后身份一致；未 accept 时写文件被拒；各准备阶段中断不会留下第二个写入者。
 
 ### T3.2 实现提交、rebase、独立评审和证据
@@ -299,7 +299,7 @@ W1 的三路并行只在临时资源充足时执行；探针共享 Orca 或 Dock
 - **Files**：创建 `src/guard/`、`deploy/sudoers/` 和 `test/isolation/guard/`。
 - **Inputs**：T0.3 通过的探针；T1.3 授权 API；T2.1 Orca 参数。
 - **Outputs**：root 所有的启动器、仅容器内生效的固定 sudo 规则、基于 `gov` 记录的身份反查、同一入口内的 `gov` 动作代理、Orca 动作授权、原终端真实 CLI 启动和回执。
-- **Accept rule**：Agent 不能读取 broker 凭据或执行其二进制；启动器不得采用 Agent 提供的 worker 注入指令作为身份输入；任务与评审的 `gov` 动作和 Orca 动作共用同一固定入口，不增加第二个 sudo 入口；真实 CLI 只在 broker 专用固定目录加载，不读取任务仓库配置、任务内模块或 Agent 环境变量；只能使用当前角色允许的动作；禁止 shell 透传、组地址和管理命令；镜像移除其他不需要的 setuid/setgid 可执行文件，不修改宿主 sudo 配置。
+- **Accept rule**：Agent 不能读取 broker 凭据或执行其二进制；启动器不得采用 Agent 提供的 worker 注入指令作为身份输入；任务与评审的 `gov` 动作和 Orca 动作共用同一固定入口，不增加第二个 sudo 入口；真实 CLI 只在 broker 专用固定目录加载，不读取任务仓库配置、任务内模块或 Agent 环境变量；只能使用当前角色允许的动作；禁止 shell 透传、组地址和管理命令；镜像移除其他不需要的 setuid/setgid 可执行文件，不修改宿主 sudo 配置；部署含工作区信任预置步骤（未预信任的首个 worker 必死于信任门，2026-11-07 实证）。
 - **Verification gate**：直接执行、PATH 替换、环境变量注入、恶意仓库配置、任务内模块植入、参数注入、伪造注入指令、伪造 Dispatch、允许的 `gov` 动作、越权 `gov` 动作、越权 `worker_done`、其他 setuid 路径和管理命令测试全部通过。
 
 ### T5.2 完成容器隔离与资源限制
