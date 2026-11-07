@@ -1,7 +1,7 @@
 # Orca 多 Agent 治理代理实施计划
 
-> 版本：v0.2（评审修订，待平台探针）  
-> 日期：2026-11-04  
+> 版本：v0.3（终审修订：结算/重派动词、accept 前只读、失败与重送承接、资源记账清理；预算准入延后）  
+> 日期：2026-11-07  
 > 技术设计：[governance-design.md](./governance-design.md)  
 > 实施目录：`/Users/souler/Documents/daqian/playground/orca-dev-workflow`  
 > 规则：任务只描述文件边界、输入、输出、接受规则和验证，不预写实现代码
@@ -219,9 +219,9 @@ W1 的三路并行只在临时资源充足时执行；探针共享 Orca 或 Dock
 
 - **Files**：创建 `src/adapters/orca.ts` 和 `test/integration/orca/`。
 - **Inputs**：T0.2/T0.3 证据；当前 Orca JSON 输出；T1.1 领域类型。
-- **Outputs**：版本与能力检查、Task/Session/Dispatch 创建和查询、定向消息、受限搜索结果与分页读取、`run-use` 协调恢复、`worker-read` 有界读取、release、worktree 删除、统一回执和 Orca `doctor` 检查。
+- **Outputs**：版本与能力检查、Task/Session/Dispatch 创建和查询、定向消息、受限搜索结果与分页读取、`run-use` 协调恢复、`worker-read` 有界读取、release、`worker-stop` / `worker-abandon` 结算、`worker-start --retry-of` 重派、worktree 删除、统一回执和 Orca `doctor` 检查。
 - **Accept rule**：同一 Run 使用同一 Orca executable；所有 JSON 经结构校验；失败保留 `failedStage`、`residualResources` 和安全错误码；正常路径不调用 `task-update`；Session 读取默认有数量和范围上限。
-- **Verification gate**：真实 Orca 临时 Run 覆盖启动、重复启动拒绝、终端不匹配、定向消息、搜索/分页读取、新协调 Session `run-use` 恢复、`worker-read` 边界、结果不确定、doctor 和清理。
+- **Verification gate**：真实 Orca 临时 Run 覆盖启动、重复启动拒绝、终端不匹配、定向消息、搜索/分页读取、新协调 Session `run-use` 恢复、`worker-read` 边界、`worker-stop` 结算与 `retry-of` 重派、结果不确定、doctor 和清理。
 
 ### T2.2 实现 jj 适配层
 
@@ -235,9 +235,9 @@ W1 的三路并行只在临时资源充足时执行；探针共享 Orca 或 Dock
 
 - **Files**：创建 `src/adapters/environment.ts`、`orca.yaml`、`scripts/orca-vm/`、`test/integration/environment/`。
 - **Inputs**：T0.2–T0.4；T1.3 的基础 doctor 接口；Orca per-workspace environment recipe 接口。
-- **Outputs**：create、suspend、resume、destroy、静态与综合 `doctor`、资源 ID 和残余资源回执。
-- **Accept rule**：不启动云资源；create 输出符合 SSH-mode；suspend 后任务进程不能写入，resume 保留原终端和 Session；destroy 具有幂等记录；失败保留环境 ID；不提供 `destroy: none`。
-- **Verification gate**：免费静态检查无警告；临时容器 create/suspend/resume/destroy 两次结果一致；综合 `doctor` 同时报告 Node、Orca、jj、Docker、目录和版本；异常退出后资源可查明。
+- **Outputs**：create、suspend、resume、destroy、认领激活前的工作区只读挂载与 accept 后的写权限切换、静态与综合 `doctor`、资源 ID 和残余资源回执。
+- **Accept rule**：不启动云资源；create 输出符合 SSH-mode；认领激活前任务用户对工作区只读，accept 后由 `gov` 切换为可写，切换失败回退并转人工；suspend 后任务进程不能写入，resume 保留原终端和 Session；destroy 具有幂等记录；失败保留环境 ID；不提供 `destroy: none`。
+- **Verification gate**：免费静态检查无警告；临时容器 create/suspend/resume/destroy 两次结果一致；未 accept 时写文件被拒、accept 后可写；综合 `doctor` 同时报告 Node、Orca、jj、Docker、目录和版本；异常退出后资源可查明。
 
 ## 9. Phase 3：单任务完整生命周期
 
@@ -246,24 +246,24 @@ W1 的三路并行只在临时资源充足时执行；探针共享 Orca 或 Dock
 - **Files**：创建 `src/services/tasks.ts`、`claims.ts`、`workspaces.ts` 和 `test/unit/claims/`。
 - **Inputs**：T1.1–T2.3 的输出；设计 §8.1。
 - **Outputs**：任务声明、认领保留、环境准备、Dispatch 绑定、执行者接受和完整回执。
-- **Accept rule**：只有执行者 `accept` 后才允许开发；准备中或结果不确定也阻止第二认领；任何历史认领均可查询。
-- **Verification gate**：两个并发请求只产生一个有效执行环境；接受前后身份一致；各准备阶段中断不会留下第二个写入者。
+- **Accept rule**：只有执行者 `accept` 后才允许开发；认领激活前工作区保持只读，accept 触发写权限切换，切换失败回退并转人工；准备中或结果不确定也阻止第二认领；任何历史认领均可查询。
+- **Verification gate**：两个并发请求只产生一个有效执行环境；接受前后身份一致；未 accept 时写文件被拒；各准备阶段中断不会留下第二个写入者。
 
 ### T3.2 实现提交、rebase、独立评审和证据
 
 - **Files**：创建 `src/services/submissions.ts`、`src/services/rebases.ts`、`src/services/reviews.ts`、`src/services/evidence.ts` 和 `test/unit/reviews/`。
 - **Inputs**：设计 §6.2、§6.3、§8.2、§8.3、§10；T3.1 活动认领；T1.1 任务级预算；T1.2 事件记录。
-- **Outputs**：版本固定、开发环境暂停/恢复、rebase 请求与冲突处理、旧证据失效、开发证据、独立评审 Session/工作区、问题记录、逐项评审证据、通过或退回结果。
-- **Accept rule**：声明者和任何历史认领者不能评审；每次提交使用新 Session；版本、tree、证据、范围或任务预算任一不符都不能通过；`OPEN` 中高严重度问题阻止签核，低严重度问题必须具有处理状态和理由；rebase 后必须重新提交，snapshot 后仍有冲突时拒绝。
-- **Verification gate**：覆盖声明者/当前认领者/历史认领者换 Dispatch 后的身份拒绝、缺证据、人工证据、版本漂移、评审 tree 改动、重复提交、问题分级、任务预算、评审退回、退回恢复前 `WORKSPACE_DIVERGED`、目标移动、无冲突 rebase、冲突解决后重新评审、环境暂停失败，以及暂停后使用原请求 ID 恢复结果。
+- **Outputs**：版本固定、开发环境暂停/恢复、rebase 请求与冲突处理、旧证据失效、开发证据、独立评审 Session/工作区、问题记录、逐项评审证据、通过或退回结果、业务失败与人工取消迁移、同版本补证据重送、人工验收回执校验。
+- **Accept rule**：声明者和任何历史认领者不能评审；每次提交使用新 Session；版本、tree、证据、范围或任务预算任一不符都不能通过；`OPEN` 中高严重度问题阻止签核，低严重度问题必须具有处理状态和理由；rebase 后必须重新提交，snapshot 后仍有冲突时拒绝；`task fail` 确认后仅允许以 `--outcome failed` 收尾；`review request` 仅限证据类退回并消耗轮数预算；`manual` 证据必须匹配宿主侧 `manual approve` 回执。
+- **Verification gate**：覆盖声明者/当前认领者/历史认领者换 Dispatch 后的身份拒绝、缺证据、人工证据、伪造人工回执、版本漂移、评审 tree 改动、重复提交、问题分级、任务预算、评审退回、非证据类退回时同版本重送被拒、业务失败路径、退回恢复前 `WORKSPACE_DIVERGED`、目标移动、无冲突 rebase、冲突解决后重新评审、环境暂停失败，以及暂停后使用原请求 ID 恢复结果。
 
 ### T3.3 实现快进合并、归档和清理
 
 - **Files**：创建 `src/services/merges.ts`、`cleanup.ts` 和 `test/integration/lifecycle/`。
 - **Inputs**：T3.2 通过结论；T2.1–T2.3 回执；设计 §8.4。
-- **Outputs**：目标串行合并、合并确认、正常完成、归档、环境删除、jj 注销和清理状态。
-- **Accept rule**：目标移动使旧签核失效；未确认合并不删除；无活动写入者和归档完成后才清理；清理失败不重开开发。
-- **Verification gate**：正常完成、worker 消失、合并前目标移动、合并后恢复前 `WORKSPACE_DIVERGED`、归档失败、环境删除失败和重复清理均有证据；版本分叉时不得自动回滚已确认合并。
+- **Outputs**：目标串行合并、合并确认、正常完成、按资源记账的清理（退回轮评审资源、失败/取消/被替代任务资源，设计 §8.6）、归档、环境删除、jj 注销和清理状态。
+- **Accept rule**：目标移动使旧签核失效；未确认合并不删除正常路径资源；评审资源在结论受理后即销毁，不依赖任务结局；无活动写入者和归档完成后才清理；清理失败不重开开发。
+- **Verification gate**：正常完成、worker 消失、合并前目标移动、合并后恢复前 `WORKSPACE_DIVERGED`、归档失败、环境删除失败和重复清理均有证据；退回轮评审资源、失败、取消与被替代任务的销毁均有回执；版本分叉时不得自动回滚已确认合并。
 
 ## 10. Phase 4：恢复与父子任务
 
@@ -271,17 +271,17 @@ W1 的三路并行只在临时资源充足时执行；探针共享 Orca 或 Dock
 
 - **Files**：创建 `src/services/recovery.ts` 和 `test/integration/recovery/`。
 - **Inputs**：T1.3 操作记录；T3.1–T3.3 的外部回执；设计 §7.3、§13。
-- **Outputs**：操作检查点、结果核对、人工恢复入口、协调 Session 替换、执行认领替换、任务版本替代和各阶段故障注入报告。
-- **Accept rule**：结果不确定时不自动重试；只有查明外部事实才能恢复；恢复不重复创建 Session、合并或删除；旧 writer 未明确退出前不能替换认领；旧提交和评审不能转移给新认领；范围变化以新任务版本替代。
-- **Verification gate**：在每个 Orca、jj、Docker 调用前后各注入一次退出，覆盖协调 Session 恢复、执行 Session 替换、任务替代和旧 writer 仍存活，全部达到可解释状态且无重复副作用。
+- **Outputs**：操作检查点、结果核对、人工恢复入口、协调 Session 替换、执行认领替换（`worker-stop` / `worker-abandon` 结算 + `retry-of` 重派）、任务版本替代和各阶段故障注入报告。
+- **Accept rule**：结果不确定时不自动重试；只有查明外部事实才能恢复；恢复不重复创建 Session、合并或删除；旧 writer 未结算前不能重派，重派必须走 `retry-of`；旧提交和评审不能转移给新认领；范围变化以新任务版本替代。
+- **Verification gate**：在每个 Orca、jj、Docker 调用前后各注入一次退出，覆盖协调 Session 恢复、执行 Session 替换（含结算与重派）、任务替代和旧 writer 仍存活，全部达到可解释状态且无重复副作用。
 
 ### T4.2 实现单阻塞子任务与父任务恢复
 
 - **Files**：创建 `src/services/children.ts` 和 `test/integration/children/`。
 - **Inputs**：设计 §8.5；T3.3 合并能力；T4.1 操作记录。
 - **Outputs**：父版本锁定、父环境暂停/恢复、子任务声明/认领/评审、父版本快进、父工作区更新、幂等恢复消息。
-- **Accept rule**：父任务等待时环境必须暂停；子任务路径必须属于父任务范围且不能替换父认领；子任务不直接合入顶层 bookmark；恢复前发现额外本地改动时停止覆盖并转人工；重复恢复消息不产生重复修改。
-- **Verification gate**：覆盖父环境暂停失败、等待期间替换父认领、子任务路径越界、父工作区版本分叉、子任务退回、子任务目标冲突、重复消息、使用原请求 ID 恢复父任务、三层深度限制和子任务清理。
+- **Accept rule**：父任务等待时环境必须暂停；子任务路径必须属于父任务范围且不能替换父认领；子任务不直接合入顶层 bookmark；子任务取消或失败时父任务恢复但不快进父版本；恢复前发现额外本地改动时停止覆盖并转人工；重复恢复消息不产生重复修改。
+- **Verification gate**：覆盖父环境暂停失败、等待期间替换父认领、子任务路径越界、父工作区版本分叉、子任务取消/失败后父恢复不快进、子任务退回、子任务目标冲突、重复消息、使用原请求 ID 恢复父任务、三层深度限制和子任务清理。
 
 ## 11. Phase 5：受控运行
 
@@ -324,8 +324,8 @@ W1 的三路并行只在临时资源充足时执行；探针共享 Orca 或 Dock
 - **Files**：创建 `src/services/budgets.ts`、`status.ts` 和 `test/unit/budgets/`。
 - **Inputs**：设计 §11.2；T1.2 事件记录；T5.3 角色配置。
 - **Outputs**：活动任务/评审/构建限制、供应商请求限制、状态摘要、阻塞原因、下一步和状态变化通知。
-- **Accept rule**：达到预算时等待，不自动换模型；普通进度不通知人；异常包含可操作下一步，不包含完整转写记录。
-- **Verification gate**：两个任务与一个构建上限同时验证；模拟供应商 429、消息重复和通知失败，不影响治理状态。
+- **Accept rule**：达到预算时等待，不自动换模型；普通进度不通知人；异常包含可操作下一步，不包含完整转写记录。构建并发与供应商请求上限为延后项：本任务只实现任务与评审并发控制，不实现构建/请求准入（设计 §11.2 已标注缺口）。
+- **Verification gate**：两个任务与一个评审上限同时验证（构建并发为延后项，不在验证范围）；模拟供应商 429、消息重复和通知失败，不影响治理状态。
 
 ### T6.3 执行真实 Agent 试点并更新工作流
 
@@ -360,11 +360,11 @@ W1 的三路并行只在临时资源充足时执行；探针共享 Orca 或 Dock
 | G0 | 三份平台探针均有版本、回执、清理和明确结论 | T0.2–T0.4 |
 | G1 | 非法任务书、非法配置和伪造身份全部拒绝 | T1.1–T1.3 |
 | G2 | Orca/jj/Docker 真实适配与综合 doctor 通过，正常流程无 `task-update` | T2.1–T2.3 |
-| G3 | 并发认领只有一个有效写入者，接受前后身份一致 | T3.1 |
-| G4 | 三类身份拒绝、独立评审、问题分级、逐项证据、任务预算、版本与 rebase 检查全部通过 | T3.2 |
-| G5 | 只有确认快进合并后才清理，清理失败可恢复 | T3.3 |
-| G6 | 所有外部调用点的中断均无重复副作用，Session 替换不转移旧验收 | T4.1 |
-| G7 | 子任务只更新父版本，父环境暂停、路径范围与恢复幂等全部通过 | T4.2 |
+| G3 | 并发认领只有一个有效写入者，接受前后身份一致，接受前工作区只读 | T3.1 |
+| G4 | 三类身份拒绝、独立评审、问题分级、逐项证据、任务预算、版本与 rebase、业务失败、同版本重送与人工回执核验全部通过 | T3.2 |
+| G5 | 只有确认快进合并后才清理正常路径资源；评审与终态任务资源按记账销毁，清理失败可恢复 | T3.3 |
+| G6 | 所有外部调用点的中断均无重复副作用，Session 替换经结算与重派、不转移旧验收 | T4.1 |
+| G7 | 子任务只更新父版本，子任务取消/失败、父环境暂停、路径范围与恢复幂等全部通过 | T4.2 |
 | G8 | 受限启动器保持身份来源，伪造注入指令与越权 Orca 操作全部失败 | T5.1 |
 | G9 | 元数据、跨目录、凭据、资源和提前完成隔离全部通过 | T5.2 |
 | G10 | 全量测试两次通过，通知与预算不改变治理事实 | T6.1–T6.2 |
@@ -375,7 +375,7 @@ W1 的三路并行只在临时资源充足时执行；探针共享 Orca 或 Dock
 
 ### 开工前
 
-- [ ] 评审者确认 D1–D15，尤其是独立评审、快进合并、环境暂停和受限启动器。
+- [ ] 评审者确认 D1–D20，尤其是独立评审、快进合并、环境暂停、受限启动器、完整迁移表与资源记账清理。
 - [ ] T0.2–T0.4 的失败停止范围未被改成宿主直接运行。
 - [ ] 每个 Wave 的文件所有权无交集，Inputs 不依赖同 Wave 或未来产物。
 - [ ] 所有测试使用临时仓库、临时 Run 和临时容器。

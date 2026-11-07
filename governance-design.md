@@ -1,7 +1,7 @@
 # Orca 多 Agent 治理代理技术设计
 
-> 版本：v0.2（评审修订，待平台探针）  
-> 日期：2026-11-04  
+> 版本：v0.3（终审修订：状态机全出口、权限分级、资源记账清理、人工验收回执、Orca 结算合同；预算执行机制延后）  
+> 日期：2026-11-07  
 > 实施计划：[governance-tasks.md](./governance-tasks.md)  
 > 核查基线：Orca 1.4.238、jj 0.41.0、Node.js 24.15.0、pnpm 10.33.2、Docker 29.6.1
 
@@ -90,16 +90,21 @@ Orca 已提供独立 Session、定向消息、Task/Dispatch、执行尝试失效
 | D13 | Nix 延后，自动推送延后 | 首轮只验证任务治理和本地隔离 |
 | D14 | 父子依赖由 `gov` 判断，正常流程不调用 `task-update` | 避免旧 runbook 手工推进状态或覆写结果 |
 | D15 | 开发评审期间和父任务等待子任务期间暂停原环境 | 从进程和文件系统层面阻止等待期间写入 |
+| D16 | 任务状态机以完整迁移表定义全部出口与入口，含失败、取消、替代与评审中止 | 终审七处死路均源于只建模主路径 |
+| D17 | 角色禁令区分机制强制与流程约束；认领激活前工作区只读；治理存储归独立宿主用户 | 终审权限包：不可执行的承诺必须降级为流程级或补机制 |
+| D18 | 资源清理按资源记账，不依赖任务结局 | 终审清理包：退回轮与被替代任务的资源也要有销毁路径 |
+| D19 | 人工验收凭宿主侧操作员回执，容器侧不可伪造 | 终审人工验收核验：gate-resolve 不构成人工批准 |
+| D20 | worker 替换先经 worker-stop / worker-abandon 结算，重派走 retry-of | 终审 Orca 结算合同：未结算的 Dispatch 无法重派 |
 
 ## 4. 角色与身份
 
-| 角色 | 允许操作 | 明确禁止 |
-|---|---|---|
-| 协调 Session | 声明顶层任务、创建执行 Session、处理预算和异常 | 修改任务代码、代替评审签核、直接填写治理结果 |
-| 任务执行 Session | 接受认领、组织开发、声明子任务、提交验收、根据退回意见继续 | 签核、合并、调用通用 Orca 管理命令、直接运行 git/jj |
-| 开发执行者 | 修改允许路径、运行测试、报告结果 | 修改任务状态、认领其他任务、操作其他工作区 |
-| 评审 Session | 接受评审、复验、提交通过或退回结论 | 修改被审版本、合并、复用开发 Session 身份 |
-| 人工操作员 | 处理人工验收、范围变化、结果不确定和特殊授权 | 无；所有操作仍记录回执 |
+| 角色 | 允许操作 | 明确禁止 | 强制层级 |
+|---|---|---|---|
+| 协调 Session | 声明顶层任务、创建执行 Session、处理预算和异常 | 修改任务代码、代替评审签核、直接写治理存储 | 流程：宿主侧与 gov 同信任域，治理存储由独立用户与 API 边界保护（§5.1） |
+| 任务执行 Session | 接受认领、组织开发、声明子任务、提交验收、申报失败、根据退回意见继续 | 签核、合并、调用通用 Orca 管理命令、直接运行 git/jj | 机制：gov 无对应授权动词；启动器拒绝管理命令；容器内无 git/jj |
+| 开发执行者 | 修改允许路径、运行测试、报告结果 | 修改任务状态、认领其他任务、操作其他工作区 | 修改任务状态为流程级（与执行者同容器同信任域）；跨任务目录为机制级 |
+| 评审 Session | 接受评审、复验、提交通过或退回结论 | 篡改被审版本、合并、复用开发 Session 身份 | 机制：评审结论绑定评审 tree；历史认领者无法取得评审令牌 |
+| 人工操作员 | 签发人工验收回执、处理范围变化、结果不确定和特殊授权、取消任务 | 无；所有操作仍记录回执 | — |
 
 身份由宿主侧 Orca 启动回执、Dispatch ID、终端句柄和 `caller.orcaSessionId` 共同确定。客户端提交的 `session_id` 只作交叉检查，不能作为身份来源。
 
@@ -144,7 +149,8 @@ flowchart LR
 
 ### 5.1 信任边界
 
-1. `gov serve`、SQLite 和 jj 共享仓库只存在于宿主侧。
+1. `gov serve`、SQLite 和 jj 共享仓库只存在于宿主侧，并归独立宿主用户所有；协调 Session 以普通用户运行，只能经 `gov` 的宿主 API 访问治理数据，不能直接读写数据库或 jj 仓库。
+2. 任务工作区在认领激活前以只读方式挂载；`task accept` 成功后由 `gov` 切换为可写，切换失败则认领回退并转人工。
 2. 协调 Session 可以请求声明和分派，但不能直接写治理结果。
 3. 任务环境只挂载本任务工作区、受限客户端和临时构建目录。
 4. 评审环境只包含被审版本的独立工作区，不包含开发工作区写权限。
@@ -205,7 +211,7 @@ flowchart LR
 |---|---|---|
 | `command` | 评审环境的独立工作区 | 退出码、命令配置哈希、日志哈希、版本 |
 | `artifact` | 任务或评审环境 | 文件哈希、生成者、版本、大小与路径检查 |
-| `manual` | 人工操作员 | Orca 决策记录、人工说明、必要图片或设备记录 |
+| `manual` | 人工操作员 | 宿主侧 `manual approve` 回执（验收标准、操作者、时间），必要时附图片或设备记录；容器侧不可伪造，`gate-resolve` 不构成人工验收 |
 
 开发证据用于说明工作过程，评审证据用于签核。只有开发证据、没有评审证据，不能通过。
 
@@ -217,19 +223,55 @@ flowchart LR
 stateDiagram-v2
     [*] --> DECLARED
     DECLARED --> ACTIVE: 执行 Session accept
+    DECLARED --> CANCELLED: 人工取消
+    DECLARED --> SUPERSEDED: 新任务版本替代
     ACTIVE --> WAITING_CHILD: 声明一个阻塞子任务
-    WAITING_CHILD --> ACTIVE: 子任务合并且恢复消息已记录
     ACTIVE --> REVIEW_REQUESTED: submit
-    CHANGES_REQUESTED --> REVIEW_REQUESTED: 再次 submit
+    ACTIVE --> FAILED: task fail 申报业务失败
+    ACTIVE --> CANCELLED: 人工取消
+    ACTIVE --> SUPERSEDED: 旧认领已失效
+    WAITING_CHILD --> ACTIVE: 子任务合并且恢复消息已记录
+    WAITING_CHILD --> ACTIVE: 子任务取消或失败，不快进父版本
+    CHANGES_REQUESTED --> REVIEW_REQUESTED: 再次 submit 或 review request
+    CHANGES_REQUESTED --> WAITING_CHILD: 修复中发现前置问题
+    CHANGES_REQUESTED --> SUPERSEDED: 新任务版本替代
     REVIEW_REQUESTED --> IN_REVIEW: 评审 Session accept
+    REVIEW_REQUESTED --> ACTIVE: 目标移动需 rebase，未开始的评审取消
+    REVIEW_REQUESTED --> SUPERSEDED: 新任务版本替代，取消评审
     IN_REVIEW --> CHANGES_REQUESTED: 退回
+    IN_REVIEW --> REVIEW_REQUESTED: 评审员死亡或中止，重建评审
+    IN_REVIEW --> SUPERSEDED: 新任务版本替代，取消评审
     IN_REVIEW --> APPROVED: 全部验收通过
     APPROVED --> MERGED: 快进合并已确认
-    MERGED --> COMPLETED: 写入者退出、归档与清理完成
-    DECLARED --> SUPERSEDED: 新任务版本替代
-    ACTIVE --> SUPERSEDED: 旧认领已失效
     APPROVED --> CHANGES_REQUESTED: 合并前目标移动
+    MERGED --> COMPLETED: 写入者退出、归档与清理完成
 ```
+
+完整迁移表（每条迁移含触发者与环境动作；未列出的迁移一律非法，`T1.2` 拒绝写入）：
+
+| 当前状态 | 事件 | 目标 | 环境与资源动作 |
+|---|---|---|---|
+| DECLARED | 执行 Session accept | ACTIVE | 工作区由只读切换为可写 |
+| DECLARED | 人工取消 | CANCELLED | 无资源，仅记账 |
+| DECLARED | 新任务版本替代 | SUPERSEDED | 无资源，仅记账 |
+| ACTIVE | submit | REVIEW_REQUESTED | 记录版本；等待 merge_ready 后暂停开发环境 |
+| ACTIVE | task fail | FAILED | 确认后允许 worker_done --outcome failed；按 §8.6 清理 |
+| ACTIVE | task split | WAITING_CHILD | 固定父版本，暂停父环境，创建子任务 |
+| ACTIVE / CHANGES_REQUESTED | 人工取消 | CANCELLED | 结算 Dispatch，按 §8.6 清理 |
+| ACTIVE / CHANGES_REQUESTED / REVIEW_REQUESTED / IN_REVIEW | 新任务版本替代 | SUPERSEDED | 已启动的评审取消并销毁评审资源；按 §8.6 清理 |
+| WAITING_CHILD | 子任务合并且恢复消息已记录 | ACTIVE | 快进父版本，确认 tree 后恢复父环境 |
+| WAITING_CHILD | 子任务取消或失败 | ACTIVE | 不快进父版本；确认 tree 后恢复父环境，由父执行者自行处理 |
+| CHANGES_REQUESTED | 再次 submit（新版本） | REVIEW_REQUESTED | 记录新版本，旧证据作废 |
+| CHANGES_REQUESTED | review request（同版本补证据） | REVIEW_REQUESTED | 复用版本，消耗评审轮数预算 |
+| CHANGES_REQUESTED | task split | WAITING_CHILD | 同 ACTIVE 的 split 动作 |
+| REVIEW_REQUESTED | 评审 Session accept | IN_REVIEW | 创建评审环境与工作区 |
+| REVIEW_REQUESTED | 目标移动需 rebase | ACTIVE | 取消未开始的评审；恢复开发环境执行 rebase |
+| IN_REVIEW | 退回 | CHANGES_REQUESTED | 销毁评审资源；tree 确认后恢复开发环境 |
+| IN_REVIEW | 评审员死亡或中止 | REVIEW_REQUESTED | 销毁评审资源；重建评审环境与新评审 Session |
+| IN_REVIEW | 全部验收通过 | APPROVED | 销毁评审资源 |
+| APPROVED | 快进合并已确认 | MERGED | 合并读回确认；恢复开发环境允许最终 worker_done |
+| APPROVED | 合并前目标移动 | CHANGES_REQUESTED | 旧签核失效；恢复开发环境 |
+| MERGED | 写入者退出、归档与清理完成 | COMPLETED | 按 §8.4 收尾 |
 
 `FAILED`、`CANCELLED` 只表示明确的业务终止。平台超时、Orca 连接中断或合并结果不确定使用 `blocked_reason` 和操作状态表示，不直接改写为业务失败。
 
@@ -265,16 +307,17 @@ stateDiagram-v2
 1. 执行 Session 完成开发后调用 `task submit`。
 2. `gov` 在宿主侧执行 jj snapshot，检查允许修改路径，记录 commit ID 和 tree ID。
 3. `gov` 检查目标是否仍等于提交时预期位置；目标已移动则要求 rebase。
-4. `gov` 保存开发证据并允许受限启动器发送 `merge_ready`，原 Orca Task 保持未结算。
-5. `merge_ready` 已确认后，`gov` 撤销本次认领的写动作并暂停任务环境。暂停失败时不启动评审。
+4. `task submit` 受理后立即返回回执（提交号、版本、tree ID），不阻塞等待评审结果。执行 Session 随后经受限启动器发送 `merge_ready`（Orca 动作，因对应提交已存在而获得授权），原 Orca Task 保持未结算。
+5. `gov` 从 Run 邮箱确认 `merge_ready` 后，撤销本次认领的写动作并暂停任务环境。暂停失败时不启动评审。
 6. `gov` 创建独立评审工作区和评审 Session。评审者不得是声明者或任何历史认领者。
 7. 评审者逐项复验。验证命令使用任务书中的配置，在评审环境运行。
 8. 评审结束后检查评审工作区中受版本控制的 tree 是否仍等于被审 tree；发生变化则本次评审无效。
 9. 评审 Session 提交结论、问题记录和证据。评审任务本身以「评审工作已完成」结算，与「开发任务通过」是两个不同结果。
 10. 退回时，`gov` 先确认暂停中的工作副本 tree 仍等于提交 tree。若不一致，进入 `WORKSPACE_DIVERGED` 并转人工，不恢复写入；若一致，恢复原任务环境，再向原认领 Dispatch 发送定向消息，原执行 Session 继续修改。
 11. 每次重新提交都创建新评审 Session。任务级评审轮数、时间和产物大小在签核前检查，超出上限时拒绝签核并转人工；恰好用满上限且评审通过的，正常签核。
+12. 退回理由不含代码缺陷（仅证据或流程问题）时，执行 Session 可调用 `review request` 对同一版本补充证据重新送审；该动作消耗评审轮数预算，且必须附补充证据。`task submit` 仍只接受新版本。
 
-`task submit` 是持久操作。客户端可能在环境暂停期间保持等待；恢复后使用原请求 ID 获取退回或签核结果。连接中断时重新查询同一操作，不创建新提交。环境暂停必须保留进程状态，使原 worker 能在恢复后继续其终端上下文。
+`task submit` 是持久操作：受理即产生提交号，连接中断后用原请求 ID 查询受理结果，不创建重复提交。评审结果不通过 submit 返回——环境暂停前 submit 已返回；执行 Session 通过 `task status` 轮询，或在环境恢复时收到携带结论的定向消息。环境暂停必须保留进程状态，使原 worker 能在恢复后继续其终端上下文。
 
 ### 8.3 签核条件
 
@@ -295,7 +338,7 @@ stateDiagram-v2
 2. 合并前再次比较目标、提交版本和 tree ID，只允许快进。
 3. 合并后读取 bookmark 和 op log，确认预期结果，再写入 `MERGED`。
 4. 正常路径在恢复原任务环境前，再次确认工作副本 tree 等于提交 tree；不一致时进入 `WORKSPACE_DIVERGED`，不恢复写入、不清理，已确认合并不自动回滚。确认一致后恢复环境，允许原 worker 发送最终 `worker_done`，随后执行 Orca release。
-5. worker 已消失时，必须取得 Orca 的明确退出或停止记录；不能伪造 `worker_done`。
+5. worker 已消失时，`gov` 先经 `worker-stop` 结算 Dispatch（结果不确定时取得正面退出证明后 `worker-abandon`），再继续收尾；不能伪造 `worker_done`。
 6. 证据和审计记录归档到工作区之外。
 7. Orca 执行 worktree/environment 删除并确认目录已清理。
 8. `gov` 再执行 `jj workspace forget`，移除仓库对该工作区的跟踪。
@@ -311,9 +354,23 @@ stateDiagram-v2
 6. `gov` 更新父工作区前先比较实际 tree 与锁定 tree；出现额外改动时进入 `PARENT_WORKSPACE_DIVERGED`，不得覆盖，转人工处理。
 7. 父工作区确认一致后，`gov` 恢复父环境并记录父任务恢复事件。父任务消息采用至少一次投递；父任务以 `parent_revision` 幂等处理，重复消息不能产生重复修改。
 8. 父任务等待期间不能替换认领。父 Session 无法恢复时，先完成或取消子任务，再按恢复流程处理父认领。
-9. 父任务恢复后必须检查子任务结果和自身验收标准，不能直接签核父任务。
+9. 子任务失败或被取消时，父任务回到 ACTIVE 但不快进父版本；父执行者需自行处理原问题或再次拆分。恢复前的 tree 一致性检查与合并路径相同。
+10. 父任务恢复后必须检查子任务结果和自身验收标准，不能直接签核父任务。
 
 `task split` 使用与 `task submit` 相同的持久请求语义。父环境恢复后，原请求返回子任务摘要、已合入的 `parent_revision` 和「返回父任务继续处理」的明确指令；连接中断时查询同一请求，不能重复创建子任务。
+
+### 8.6 资源清理合同
+
+清理按资源记账，不依赖任务结局。每项资源（任务环境、评审环境、工作区、Session、Dispatch）在创建时登记清理责任，销毁条件如下：
+
+| 资源 | 销毁时机 |
+|---|---|
+| 评审环境与评审工作区 | 评审结论提交并受理后立即销毁，无论通过、退回还是中止；退回后的下一轮提交前必须确认已销毁 |
+| 失败或取消任务的全部资源 | `task fail` / 人工取消的结算回执与证据归档完成后 |
+| 被替代任务的全部资源 | SUPERSEDED 迁移与归档完成后；在飞的评审同时取消并销毁 |
+| 正常路径资源 | 按 §8.4：合并确认、写入者退出、归档完成后 |
+
+清理失败进入 `cleanup_pending`，不改变已确认的结算或合并事实。清理回执按资源记录，可与外部操作状态分别重试。
 
 ## 9. 对外接口
 
@@ -329,6 +386,10 @@ stateDiagram-v2
 | `task split` | 任务执行 Session | 创建子任务并暂停父任务 |
 | `task rebase` | 任务执行 Session | 请求宿主 rebase；成功或冲突都产生新版本 |
 | `task status` | 所有已授权角色 | 返回状态、阻塞原因和下一步 |
+| `task fail` | 任务执行 Session | 申报业务失败；确认后允许 `worker_done --outcome failed` 并按 §8.6 触发清理 |
+| `review request` | 任务执行 Session | 对同一版本补充证据重新送审（仅限证据类退回） |
+| `task cancel` | 人工操作员 | 取消任务并按 §8.6 销毁资源 |
+| `manual approve` | 人工操作员 | 在宿主侧签发人工验收回执，绑定验收标准、操作者与时间；容器侧不可伪造 |
 | `review accept` | 评审 Session | 接受本次独立评审 |
 | `review submit` | 评审 Session | 提交逐项证据和结论 |
 | `operation show` / `operation resume` | 人工操作员 | 查看或恢复已查明的外部操作 |
@@ -351,7 +412,7 @@ stateDiagram-v2
 消息限制：
 
 1. `merge_ready` 只能在 `task submit` 成功后发送。
-2. 开发任务的 `worker_done` 只能在合并确认后发送；评审任务的 `worker_done` 只能在 `review submit` 被接受后发送，只表示评审工作结束。
+2. 开发任务的 `worker_done` 只能在合并确认后发送，或在 `task fail` 确认后以 `--outcome failed` 发送；评审任务的 `worker_done` 只能在 `review submit` 被接受后发送，只表示评审工作结束。
 3. 禁止组地址、任意 recipient、任意 Task/Dispatch ID 和自定义 lifecycle 参数。
 4. 禁止 `task-update`、`worker-start`、`dispatch`、`worktree`、`repo`、`terminal`、`automations` 及其他管理命令。
 5. 启动器不接受任意宿主路径、shell 文本或原始 Orca 参数透传。
@@ -393,7 +454,7 @@ stateDiagram-v2
 
 ### 11.2 并行预算
 
-任务级评审轮数、执行时间和证据大小在提交与签核流程中直接检查。跨任务预算配置为：两个活动任务、一个活动评审、一个构建任务。每个 Agent 供应商另设正在执行请求上限。达到上限时任务保持等待，不自动更换模型或供应商。
+任务级评审轮数、执行时间和证据大小在提交与签核流程中直接检查。跨任务预算配置为：两个活动任务、一个活动评审、一个构建任务。每个 Agent 供应商另设正在执行请求上限。达到上限时任务保持等待，不自动更换模型或供应商。其中任务与评审并发由 `gov` 在派发时强制；构建并发与供应商请求上限在 v0.3 为承诺级声明，尚无准入机制（已知缺口，延后处理，见任务计划 T6.2 备注）。
 
 协调 Session 只接收状态变化、问题、人工决策请求和异常。普通进度不发送给人，完整转写记录只在排障时按需读取。
 
@@ -436,8 +497,9 @@ stateDiagram-v2
 8. 证据产物保存在工作区之外，路径和大小受限，读取时再次验证哈希。
 9. `operation resume` 只接受人工查明后的恢复动作，不提供「忽略不确定状态继续」参数。
 10. 协调 Session 需要替换时，新 Session 通过 Orca `run-use` 和 `gov status` 恢复；治理数据库不依赖协调上下文。
-11. 任务执行 Session 需要替换时，必须先取得旧 writer 已退出或被停止的明确证据，再将旧认领标记为 `FENCED` 并撤销令牌。新 Dispatch 接受后才能写入；旧提交和评审不能直接转移给新认领。
+11. 任务执行 Session 需要替换时：取得旧 writer 已退出的明确证据 → `gov` 调用 `worker-stop` 结算旧 Dispatch（结果不确定时取得正面证明后用 `worker-abandon`）→ 旧认领标记为 `FENCED` 并撤销令牌 → 以 `worker-start --retry-of` 重派。新 Dispatch 接受后才能写入；旧提交和评审不能直接转移给新认领。
 12. 父任务有活动子任务时不允许替换父认领，先处理子任务，避免子任务继续指向旧父版本。
+13. 人工验收回执、`worker-stop` / `worker-abandon` / `retry-of` 回执与资源销毁回执均写入操作记录，与外部操作状态一并恢复。
 
 ## 14. 测试与发布标准
 
@@ -455,6 +517,7 @@ stateDiagram-v2
 10. 重复提交、重复评审、重复恢复和重复清理不产生重复副作用。
 11. 子任务恢复消息重复投递时，父任务效果保持幂等；子任务路径必须属于父任务范围。
 12. 认领、评审、合并和清理在各个外部调用点中断后可恢复；协调或执行 Session 替换不产生第二个写入者。
+13. 业务失败、人工取消、子任务取消、评审中止、同版本补证据重送和被替代任务都有合法迁移、结算回执与资源销毁回执；认领激活前对工作区的写入被拒绝。
 
 ### 14.2 隔离测试
 
