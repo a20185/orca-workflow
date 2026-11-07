@@ -149,7 +149,7 @@ test('operator 引导型令牌（显式含 token-issue）可调用 token-issue',
   const db: DatabaseSync = openMigratedMemoryDb();
   const bootstrapped = issueToken(db, {
     role: 'operator',
-    actions: ['token-issue', 'cancel', 'manual-approve', 'operation-show', 'operation-resume', 'serve', 'doctor'],
+    actions: ['token-issue', 'cancel', 'manual-approve', 'operation-show', 'operation-resume', 'serve', 'doctor', 'status'],
   });
   assert.ok(authenticate(db, bootstrapped.token, { action: 'token-issue' }));
   // 缺省 operator 令牌不含 token-issue。

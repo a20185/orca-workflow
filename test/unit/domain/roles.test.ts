@@ -7,7 +7,7 @@ test('GOV_ACTIONS_BY_ROLE 与设计 §9.1/§9.2 的动作映射一致', () => {
     coordinator: ['declare', 'claim', 'status'],
     executor: ['accept', 'submit', 'fail', 'split', 'rebase', 'review-request', 'status'],
     reviewer: ['review-accept', 'review-submit', 'status'],
-    operator: ['cancel', 'manual-approve', 'operation-show', 'operation-resume', 'serve', 'doctor'],
+    operator: ['cancel', 'manual-approve', 'operation-show', 'operation-resume', 'serve', 'doctor', 'status'],
     dev: [],
   });
 });

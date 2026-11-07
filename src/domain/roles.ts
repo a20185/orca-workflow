@@ -8,6 +8,6 @@ export const GOV_ACTIONS_BY_ROLE = {
   coordinator: ['declare', 'claim', 'status'],
   executor: ['accept', 'submit', 'fail', 'split', 'rebase', 'review-request', 'status'],
   reviewer: ['review-accept', 'review-submit', 'status'],
-  operator: ['cancel', 'manual-approve', 'operation-show', 'operation-resume', 'serve', 'doctor'],
+  operator: ['cancel', 'manual-approve', 'operation-show', 'operation-resume', 'serve', 'doctor', 'status'],
   dev: [],
 } as const satisfies Readonly<Record<GovRole, readonly string[]>>;

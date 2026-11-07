@@ -6,7 +6,6 @@ import { insertClaim, insertTask } from '../state/testing.ts';
 import { bootHost, call, createHostPaths, expectError, expectOk, startTestHost, type TestHost } from './testing.ts';
 
 let shared: TestHost | undefined;
-let sharedStatusToken: string | undefined;
 
 after(async () => {
   await shared?.dispose();
@@ -18,22 +17,6 @@ async function host(): Promise<TestHost> {
     assert.ok(shared.operatorToken.length > 0, '首启应打印引导 operator 令牌');
   }
   return shared;
-}
-
-/** status 不在 operator 动作清单内（§9.1）；用 token-issue 走真实链路签一枚 coordinator 令牌。 */
-async function statusToken(h: TestHost): Promise<string> {
-  if (sharedStatusToken === undefined) {
-    const result = expectOk(
-      await call(h, {
-        token: h.operatorToken,
-        action: 'token-issue',
-        payload: { role: 'coordinator' },
-      }),
-    );
-    assert.match(String(result['token']), /^govt_/);
-    sharedStatusToken = String(result['token']);
-  }
-  return sharedStatusToken;
 }
 
 /** 每个测试用自己的任务 id，避免测试间顺序依赖。 */
@@ -124,7 +107,7 @@ test('doctor：node/config/db 三项绿', async () => {
 test('status：不存在任务 → E_NOT_FOUND', async () => {
   const h = await host();
   expectError(
-    await call(h, { token: await statusToken(h), action: 'status', payload: { taskId: 'gt-missing' } }),
+    await call(h, { token: h.operatorToken, action: 'status', payload: { taskId: 'gt-missing' } }),
     'E_NOT_FOUND',
     404,
   );
@@ -132,14 +115,13 @@ test('status：不存在任务 → E_NOT_FOUND', async () => {
 
 test('status：返回任务行、blockedReason 与当前认领摘要', async () => {
   const h = await host();
-  const token = await statusToken(h);
   seedTask(h, 'gt-st-1');
   h.db.prepare('UPDATE tasks SET blocked_reason = ? WHERE task_id = ?').run('等待评审资源', 'gt-st-1');
   insertClaim(h.db, 'gc-st-1', 'gt-st-1', 'ACTIVE');
   h.db.prepare('UPDATE claims SET dispatch_id = ? WHERE claim_id = ?').run('dispatch-9', 'gc-st-1');
   h.db.prepare('UPDATE tasks SET current_claim_id = ? WHERE task_id = ?').run('gc-st-1', 'gt-st-1');
 
-  const result = expectOk(await call(h, { token, action: 'status', payload: { taskId: 'gt-st-1' } }));
+  const result = expectOk(await call(h, { token: h.operatorToken, action: 'status', payload: { taskId: 'gt-st-1' } }));
   const task = result['task'] as Record<string, unknown>;
   assert.equal(task['taskId'], 'gt-st-1');
   assert.equal(task['status'], 'DECLARED');
@@ -152,7 +134,7 @@ test('status：返回任务行、blockedReason 与当前认领摘要', async () 
 
   // 无认领的任务 currentClaim 为 null、blockedReason 为 null。
   seedTask(h, 'gt-st-2');
-  const bare = expectOk(await call(h, { token, action: 'status', payload: { taskId: 'gt-st-2' } }));
+  const bare = expectOk(await call(h, { token: h.operatorToken, action: 'status', payload: { taskId: 'gt-st-2' } }));
   assert.equal(bare['currentClaim'], null);
   assert.equal((bare['task'] as Record<string, unknown>)['blockedReason'], null);
 });
@@ -216,18 +198,17 @@ test('payload 带 session_id 不改变身份判定（身份只来自令牌）', 
 
 test('重复 requestId 同哈希：重放同响应且 operations 只有一行（含 FAILED 重放）', async () => {
   const h = await host();
-  const token = await statusToken(h);
   seedTask(h, 'gt-idem');
   const requestId = `req-idem-${randomUUID()}`;
 
   const first = await call(h, {
-    token,
+    token: h.operatorToken,
     requestId,
     action: 'status',
     payload: { taskId: 'gt-idem' },
   });
   const second = await call(h, {
-    token,
+    token: h.operatorToken,
     requestId,
     action: 'status',
     payload: { taskId: 'gt-idem' },
@@ -243,13 +224,13 @@ test('重复 requestId 同哈希：重放同响应且 operations 只有一行（
   // FAILED 调用同样冻结：重复请求返回同一错误回执。
   const failId = `req-fail-${randomUUID()}`;
   const failedOnce = await call(h, {
-    token,
+    token: h.operatorToken,
     requestId: failId,
     action: 'status',
     payload: { taskId: 'gt-not-exist' },
   });
   const failedTwice = await call(h, {
-    token,
+    token: h.operatorToken,
     requestId: failId,
     action: 'status',
     payload: { taskId: 'gt-not-exist' },
@@ -260,12 +241,11 @@ test('重复 requestId 同哈希：重放同响应且 operations 只有一行（
 
 test('同 requestId 异哈希 → E_REQUEST_HASH_MISMATCH 且不覆盖原行', async () => {
   const h = await host();
-  const token = await statusToken(h);
   seedTask(h, 'gt-hash-a');
   seedTask(h, 'gt-hash-b');
   const requestId = `req-hash-${randomUUID()}`;
   const first = await call(h, {
-    token,
+    token: h.operatorToken,
     requestId,
     action: 'status',
     payload: { taskId: 'gt-hash-a' },
@@ -273,7 +253,7 @@ test('同 requestId 异哈希 → E_REQUEST_HASH_MISMATCH 且不覆盖原行', a
   expectOk(first);
   expectError(
     await call(h, {
-      token,
+      token: h.operatorToken,
       requestId,
       action: 'status',
       payload: { taskId: 'gt-hash-b' },
@@ -283,7 +263,7 @@ test('同 requestId 异哈希 → E_REQUEST_HASH_MISMATCH 且不覆盖原行', a
   );
   // 原响应仍可重放，行数仍为 1。
   const replay = await call(h, {
-    token,
+    token: h.operatorToken,
     requestId,
     action: 'status',
     payload: { taskId: 'gt-hash-a' },
@@ -378,21 +358,11 @@ test('服务 close 后重启：不重复打印引导令牌，令牌与幂等账�
   let second: TestHost | undefined;
   try {
     assert.ok(first.operatorToken.length > 0);
-    // status 属 coordinator 动作，经 token-issue 真实链路签一枚。
-    const coordinator = expectOk(
-      await call(first, {
-        token: first.operatorToken,
-        action: 'token-issue',
-        payload: { role: 'coordinator' },
-      }),
-    );
-    const statusTokenValue = String(coordinator['token']);
-
     insertTask(first.db, 'gt-restart', 'DECLARED');
     const requestId = `req-restart-${randomUUID()}`;
     const original = expectOk(
       await call(first, {
-        token: statusTokenValue,
+        token: first.operatorToken,
         requestId,
         action: 'status',
         payload: { taskId: 'gt-restart' },
@@ -408,7 +378,7 @@ test('服务 close 后重启：不重复打印引导令牌，令牌与幂等账�
     // 幂等账本跨重启延续：同 requestId 同哈希重放原响应。
     const replay = expectOk(
       await call(second, {
-        token: statusTokenValue,
+        token: first.operatorToken,
         requestId,
         action: 'status',
         payload: { taskId: 'gt-restart' },
