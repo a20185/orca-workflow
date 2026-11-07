@@ -1,6 +1,6 @@
 # Orca 多 Agent 治理代理实施计划
 
-> 版本：v0.3（终审修订：结算/重派动词、accept 前只读、失败与重送承接、资源记账清理；预算准入延后）  
+> 版本：v0.4（colocated 工作区修订：T0.2 纯 jj 两入口皆败 → 新增 T0.2b colocated 验证；保护对象 .jj+.git）  
 > 日期：2026-11-07  
 > 技术设计：[governance-design.md](./governance-design.md)  
 > 实施目录：`/Users/souler/Documents/daqian/playground/orca-dev-workflow`  
@@ -37,7 +37,7 @@
 
 探针的阻塞范围分别如下：
 
-1. T0.2 的纯 jj 目录在两种注册入口下都无法完成注册、启动或删除时，T2.3 及其后所有生命周期任务停止，Track A 与 Track B 都不得继续到这些任务。
+1. T0.2 已实证纯 jj 两入口皆败；替代路径为 T0.2b 的 colocated 仓——其注册、启动或删除失败时，T2.3 及其后所有生命周期任务停止，Track A 与 Track B 都不得继续到这些任务。
 2. T0.3 的受限启动器或 Dispatch 身份来源验证失败时，Track B 停止；Track A 只能用模拟消息继续治理状态测试。
 3. T0.4 的元数据权限验证失败时，Track B 停止；Track A 不得把宿主权限结果当作容器隔离证据。
 
@@ -107,7 +107,8 @@ graph TD
 |---|---|---:|---|
 | W0 | T0.1 | 1 | 旧 runbook 与新治理边界已区分 |
 | W1 | T0.2、T0.3、T1.1 | 3 | 两项探针有结论；包接口已固定 |
-| W1b | T0.4 | 1 | 元数据权限探针完成（依赖 T0.2 的 jj workspace） |
+| W1b | T0.4 | 1 | 元数据权限探针完成 |
+| W1c | T0.2b | 1 | colocated 仓注册/启动/删除验证通过 |
 | W2 | T1.2、T2.1、T2.2 | 3 | 状态机和两个只读/版本适配层通过测试 |
 | W3 | T1.3 | 1 | 服务身份与客户端可用 |
 | W3b | T2.3 | 1 | 环境生命周期与综合 doctor 可用 |
@@ -170,6 +171,14 @@ W1 的三路并行只在临时资源充足时执行；探针共享 Orca 或 Dock
 - **Outputs**：folder kind 判定（含两种注册入口各自的结果）、启动回执、worktree ID、实际路径、删除行为、残余资源清单。
 - **Accept rule**：纯 jj 目录经任一可用入口完成注册、可启动独立 Agent、可删除，且 jj 共享仓库仍可查询；两种入口都失败才算平台缺口，失败时记录准确错误，不尝试 Git worktree 替代。
 - **Verification gate**：报告包含命令版本、JSON 关键字段、退出码和清理后 `worktree list` / `jj workspace list` 结果。
+
+### T0.2b 验证 colocated jj 仓的 Orca 生命周期
+
+- **Files**：只创建 `probes/orca-jj-colocated.md`；临时 colocated 仓位于独立临时目录。
+- **Inputs**：T0.2 报告与结论；Orca `repo add`、`agent launch`、`worktree list`、`worktree rm` 的当前帮助；jj 0.41.0。
+- **Outputs**：colocated 仓（`.jj` 与 `.git` 并存）的注册回执、启动回执、worktree ID、删除行为、jj 侧完整性、残余资源清单。
+- **Accept rule**：colocated 仓可注册、可启动独立 Agent 终端（无 prompt）、可删除，且删除前 jj 状态可查询、删除后目录随删；失败则记录准确错误，T2.3 及其后维持停止。
+- **Verification gate**：报告包含命令版本、JSON 关键字段、退出码和清理后 `worktree list` 结果。
 
 ### T0.3 验证受限启动器与 Dispatch 身份来源
 
@@ -357,7 +366,7 @@ W1 的三路并行只在临时资源充足时执行；探针共享 Orca 或 Dock
 
 | Gate | 必须提交的证据 | 对应任务 |
 |---|---|---|
-| G0 | 三份平台探针均有版本、回执、清理和明确结论 | T0.2–T0.4 |
+| G0 | 各平台探针均有版本、回执、清理和明确结论（T0.2 已出失败结论；T0.2b/T0.3/T0.4 待执行） | T0.2–T0.4、T0.2b |
 | G1 | 非法任务书、非法配置和伪造身份全部拒绝 | T1.1–T1.3 |
 | G2 | Orca/jj/Docker 真实适配与综合 doctor 通过，正常流程无 `task-update` | T2.1–T2.3 |
 | G3 | 并发认领只有一个有效写入者，接受前后身份一致，接受前工作区只读 | T3.1 |

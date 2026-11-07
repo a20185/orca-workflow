@@ -1,6 +1,6 @@
 # Orca 多 Agent 治理代理技术设计
 
-> 版本：v0.3（终审修订：状态机全出口、权限分级、资源记账清理、人工验收回执、Orca 结算合同；预算执行机制延后）  
+> 版本：v0.4（colocated 工作区修订：T0.2 实证纯 jj 注册两入口皆败，任务工作区改为 .jj 与 .git 并存的 colocated 仓）  
 > 日期：2026-11-07  
 > 实施计划：[governance-tasks.md](./governance-tasks.md)  
 > 核查基线：Orca 1.4.238、jj 0.41.0、Node.js 24.15.0、pnpm 10.33.2、Docker 29.6.1
@@ -25,6 +25,7 @@ Orca 已提供独立 Session、定向消息、Task/Dispatch、执行尝试失效
 6. Orca 没有为本地 worker 提供命令白名单或工作区写入隔离。
 7. Node.js 24.15.0 的 `node:sqlite` 和 `node:util.parseArgs` 已在本机通过探针；jj 0.41.0 与 Docker 29.6.1 可用。
 8. 本机未找到 Nix 命令。现有 `orca-dev-workflow` 只有 runbook 和历史问题报告，没有既有实现。
+9. T0.2 探针（2026-11-07）：纯 jj 目录经 `repo add` 被拒（`Not a valid git repository`）；`project setup-existing-folder` 通道在 1.4.238 无可用的新文件夹建档命令，现存 folder project 均为旧版遗留。结论：纯 jj 工作区不可行，改用 colocated jj（D21）。
 
 ### 1.2 官方文档约束
 
@@ -95,6 +96,7 @@ Orca 已提供独立 Session、定向消息、Task/Dispatch、执行尝试失效
 | D18 | 资源清理按资源记账，不依赖任务结局 | 终审清理包：退回轮与被替代任务的资源也要有销毁路径 |
 | D19 | 人工验收凭宿主侧操作员回执，容器侧不可伪造 | 终审人工验收核验：gate-resolve 不构成人工批准 |
 | D20 | worker 替换先经 worker-stop / worker-abandon 结算，重派走 retry-of | 终审 Orca 结算合同：未结算的 Dispatch 无法重派 |
+| D21 | 任务工作区使用 colocated jj 仓（`.jj` 与 `.git` 并存）；容器内保护对象为 `.jj` 与 `.git` 两个目录 | T0.2 实证纯 jj 目录被 `repo add` 拒收且 1.4.238 无 folder 建档命令（见 `probes/orca-jj-folder.md`）；colocated 仓是合法 Git 仓，可直接注册（T0.2b 验证） |
 
 ## 4. 角色与身份
 
@@ -554,7 +556,7 @@ stateDiagram-v2
 
 以下三项属于实施阻塞项，不能用提示词或未验证假设代替：
 
-1. 纯 jj 目录能否注册为 Orca folder workspace，并完成 Agent 启动和删除。
+1. ~~纯 jj 目录能否注册为 Orca folder workspace~~ 已验证：两注册入口皆败（`probes/orca-jj-folder.md`），按 D21 改用 colocated jj；替代验证为 T0.2b（colocated 仓的注册、启动与删除）。
 2. Orca worker 注入的 executable 能否指向任务环境内的受限启动器；真实 CLI 经独立用户启动后能否保留原 worker 的 Dispatch 身份来源。
 3. Docker 内非 root 任务用户能否在正常工作目录写入文件的同时，被阻止修改、重命名和删除 `.jj` / `.git`。
 
