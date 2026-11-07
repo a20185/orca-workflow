@@ -11,6 +11,16 @@ export const GOV_ERROR_CODES = [
   'E_RUNTIME_UNSUPPORTED',
   'E_DB_MIGRATION',
   'E_TRANSITION_INVALID',
+  // T1.3 宿主 API 面：传输、鉴权、幂等与动作分发的稳定错误码。
+  'E_NOT_FOUND',
+  'E_UNAUTHENTICATED',
+  'E_FORBIDDEN_ACTION',
+  'E_TOKEN_EXPIRED',
+  'E_REQUEST_HASH_MISMATCH',
+  'E_PAYLOAD_TOO_LARGE',
+  'E_TIMEOUT',
+  'E_ACTION_UNIMPLEMENTED',
+  'E_REQUEST_INVALID',
 ] as const;
 
 export type GovErrorCode = (typeof GOV_ERROR_CODES)[number];

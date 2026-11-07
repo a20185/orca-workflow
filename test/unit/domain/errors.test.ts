@@ -2,7 +2,7 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { GOV_ERROR_CODES, GovError } from '../../../src/domain/errors.ts';
 
-test('GOV_ERROR_CODES 恰为契约约定的九个错误码', () => {
+test('GOV_ERROR_CODES 恰为契约约定的全部错误码（T1.1 九码 + T1.3 宿主 API 九码）', () => {
   assert.deepEqual(GOV_ERROR_CODES, [
     'E_CONFIG_INVALID',
     'E_SPEC_INVALID',
@@ -13,6 +13,15 @@ test('GOV_ERROR_CODES 恰为契约约定的九个错误码', () => {
     'E_RUNTIME_UNSUPPORTED',
     'E_DB_MIGRATION',
     'E_TRANSITION_INVALID',
+    'E_NOT_FOUND',
+    'E_UNAUTHENTICATED',
+    'E_FORBIDDEN_ACTION',
+    'E_TOKEN_EXPIRED',
+    'E_REQUEST_HASH_MISMATCH',
+    'E_PAYLOAD_TOO_LARGE',
+    'E_TIMEOUT',
+    'E_ACTION_UNIMPLEMENTED',
+    'E_REQUEST_INVALID',
   ]);
 });
 
