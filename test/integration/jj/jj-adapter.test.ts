@@ -50,6 +50,7 @@ const wsBDir = join(tmpRoot, 'ws-b');
 const config: GovConfig = {
   schemaVersion: 1,
   repos: [{ repoId: 'it-repo', hostPath: repoDir, targets: ['base'] }],
+  archiveRoot: join(tmpRoot, 'archive'),
 };
 
 const adapter = createJjAdapter({ repoRoot: repoDir, config });

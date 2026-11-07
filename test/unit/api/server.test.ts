@@ -101,7 +101,7 @@ test('doctor：node/config/db 三项绿', async () => {
   assert.equal(config.ok, true);
   assert.equal(config.repoCount, 1);
   assert.equal(db.ok, true);
-  assert.deepEqual(db.migrationIds, [1]);
+  assert.deepEqual(db.migrationIds, [1, 2]);
 });
 
 test('status：不存在任务 → E_NOT_FOUND', async () => {

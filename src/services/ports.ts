@@ -10,6 +10,8 @@
 import type {
   createOrcaAdapter,
   TaskReceipt,
+  WorkerSettleReceipt,
+  WorkerShowReceipt,
   WorkerStartReceipt,
 } from '../adapters/orca.ts';
 import type { createJjAdapter } from '../adapters/jj.ts';
@@ -179,3 +181,40 @@ const _orcaMessagingAdapterIsPortable: OrcaMessagingPort = undefined as unknown 
 void _jjVersionAdapterIsPortable;
 void _envLifecycleAdapterIsPortable;
 void _orcaMessagingAdapterIsPortable;
+
+// ---------------------------------------------------------------------------
+// T3.3 扩展端口：快进合并（bookmark 移动 + op log 回执）与 Orca 结算面
+// （workerShow/workerAbandon/workerRelease）。同样以 extends 追加，不改既有端口。
+// ---------------------------------------------------------------------------
+
+/** jj 合并端口（T2.2 适配器子集）：快进移动 bookmark 与 op log 回执。 */
+export interface JjMergePort extends JjVersionPort {
+  moveBookmarkFF(input: {
+    readonly bookmark: string;
+    readonly toCommit: string;
+    readonly expectedCurrent: string;
+  }): Promise<{ ok: true; from: string; to: string; opIds: string[] }>;
+  opLogReceipt(n?: number | undefined): Promise<{ ok: true; opIds: string[] }>;
+}
+
+/**
+ * Orca 结算扩展端口：合并收尾与清理需要读取派工事实（workerShow）、
+ * workerAbandon（仅在取得正面退出证据后）与 workerRelease（清理台账的
+ * dispatch 项动作）。T2.1 适配器逐字同形。
+ */
+export interface OrcaSettlementPort extends OrcaMessagingPort {
+  /** 收窄基端口的 unknown 回执：合并/清理消费 state/alreadySettled/processAction。 */
+  workerStop(dispatch: string): Promise<{ ok: true; raw: WorkerSettleReceipt }>;
+  workerShow(dispatch: string): Promise<{ ok: true; raw: WorkerShowReceipt }>;
+  workerAbandon(dispatch: string): Promise<{ ok: true; raw: WorkerSettleReceipt }>;
+  workerRelease(dispatch: string): Promise<{ ok: true; raw: WorkerSettleReceipt }>;
+}
+
+const _jjMergeAdapterIsPortable: JjMergePort = undefined as unknown as ReturnType<
+  typeof createJjAdapter
+>;
+const _orcaSettlementAdapterIsPortable: OrcaSettlementPort = undefined as unknown as ReturnType<
+  typeof createOrcaAdapter
+>;
+void _jjMergeAdapterIsPortable;
+void _orcaSettlementAdapterIsPortable;

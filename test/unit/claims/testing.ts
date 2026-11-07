@@ -76,6 +76,7 @@ export function createFakeHost(options: { readonly stepTimeoutMs?: number } = {}
   const config: GovConfig = {
     schemaVersion: 1,
     repos: [{ repoId: 'demo', hostPath: path.join(repoRoot, 'repo'), targets: ['main'] }],
+    archiveRoot: path.join(repoRoot, 'archive'),
   };
   const db = openClaimsTestDb();
   const orca = new FakeOrca();

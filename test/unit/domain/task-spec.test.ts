@@ -7,6 +7,7 @@ import { normalizeTaskSpec, parseTaskSpec } from '../../../src/domain/task-spec.
 const config: GovConfig = {
   schemaVersion: 1,
   repos: [{ repoId: 'demo', hostPath: '/srv/repos/demo', targets: ['main', 'feat-x'] }],
+  archiveRoot: '/tmp/gov-unit-spec-archive',
 };
 
 function validCriteria(): Array<Record<string, unknown>> {

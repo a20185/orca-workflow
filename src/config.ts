@@ -25,6 +25,11 @@ export const govConfigSchema = z.strictObject({
   schemaVersion: z.literal(1),
   // 空仓清单没有可治理对象，视为配置错误而非合法空态。
   repos: z.array(repoConfigSchema).min(1),
+  // 归档根（T3.3）：任务收尾时 evidence 产物与回执快照落盘位置，必须是绝对路径。
+  archiveRoot: z
+    .string()
+    .min(1)
+    .refine((p) => p.startsWith('/'), { message: 'archiveRoot 必须是以 / 开头的绝对路径' }),
 });
 
 export type RepoConfig = z.infer<typeof repoConfigSchema>;

@@ -51,6 +51,9 @@ test('GOV_ERROR_CODES 恰为契约约定的全部错误码（T1.1 九码 + T1.3 
     'E_BUDGET_EXCEEDED',
     'E_WORKSPACE_DIVERGED',
     'E_NO_REVIEWER',
+    'E_MERGE_UNCERTAIN',
+    'E_ARCHIVE_FAILED',
+    'E_CLEANUP_FAILED',
   ]);
 });
 

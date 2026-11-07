@@ -9,6 +9,7 @@ import { GovError } from '../../../src/domain/errors.ts';
 const validConfigJson = {
   schemaVersion: 1,
   repos: [{ repoId: 'demo', hostPath: '/srv/repos/demo', targets: ['main', 'feat-x'] }],
+  archiveRoot: '/srv/gov/archive',
 };
 
 async function withTempConfig(content: string, run: (path: string) => Promise<void>): Promise<void> {
@@ -100,6 +101,16 @@ test('loadConfig：schemaVersion 非 1 抛 E_CONFIG_INVALID', async () => {
   await withTempConfig(JSON.stringify(bad), async (path) => {
     await expectConfigError(path);
   });
+});
+
+test('loadConfig：缺 archiveRoot / 相对 archiveRoot 抛 E_CONFIG_INVALID', async () => {
+  const missing = { schemaVersion: 1, repos: validConfigJson.repos };
+  const relative = { ...validConfigJson, archiveRoot: 'gov/archive' };
+  for (const bad of [missing, relative]) {
+    await withTempConfig(JSON.stringify(bad), async (path) => {
+      await expectConfigError(path, 'archiveRoot');
+    });
+  }
 });
 
 test('assertRuntime：主版本 < 24 抛 E_RUNTIME_UNSUPPORTED（注入版本串）', () => {

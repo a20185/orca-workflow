@@ -14,6 +14,7 @@ import { startServer, type GovServer } from '../../../src/server.ts';
 const configJson = {
   schemaVersion: 1,
   repos: [{ repoId: 'demo', hostPath: '/srv/repos/demo', targets: ['main', 'feat-x'] }],
+  archiveRoot: '/tmp/gov-unit-api-archive',
 };
 
 export interface HostPaths {

@@ -21,6 +21,8 @@ const EXPECTED_TABLES = [
   'operations',
   'events',
   'capabilities',
+  // 迁移 2（T3.3 §8.6）：资源台账。
+  'cleanup_items',
 ];
 
 function objectNames(db: ReturnType<typeof openDatabase>, kind: 'table' | 'index' | 'trigger') {
@@ -31,7 +33,7 @@ function objectNames(db: ReturnType<typeof openDatabase>, kind: 'table' | 'index
     .sort();
 }
 
-test('migrate 建齐 §6.2 全部 12 张记录表 + migrations + 业务索引与触发器', () => {
+test('migrate 建齐 §6.2 全部 13 张记录表 + migrations + 业务索引与触发器', () => {
   const db = openMigratedMemoryDb();
   const tables = objectNames(db, 'table');
   for (const name of [...EXPECTED_TABLES, 'migrations']) {
@@ -45,8 +47,9 @@ test('migrate 建齐 §6.2 全部 12 张记录表 + migrations + 业务索引与
     'uq_submissions_claim_commit',
     'uq_reviews_conclusive_per_submission',
     'uq_operations_request',
+    'ix_cleanup_items_task',
   ]) {
-    assert.ok(indexes.includes(name), `缺唯一索引: ${name}`);
+    assert.ok(indexes.includes(name), `缺索引: ${name}`);
   }
 
   const triggers = objectNames(db, 'trigger');

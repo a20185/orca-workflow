@@ -56,6 +56,12 @@ export const GOV_ERROR_CODES = [
   'E_BUDGET_EXCEEDED',
   'E_WORKSPACE_DIVERGED',
   'E_NO_REVIEWER',
+  // T3.3 合并/归档/清理服务层：合并结果不确定（读回不一致或外部步骤超时，绝不
+  // 回滚不清理）、归档失败（cleanup_pending，资源全保留）与清理失败（单项 failed
+  // 可重试）。目标移动复用 E_JJ_TARGET_MOVED（适配器已按同一语义抛出）。
+  'E_MERGE_UNCERTAIN',
+  'E_ARCHIVE_FAILED',
+  'E_CLEANUP_FAILED',
 ] as const;
 
 export type GovErrorCode = (typeof GOV_ERROR_CODES)[number];

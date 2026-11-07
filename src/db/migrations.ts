@@ -198,8 +198,31 @@ export interface Migration {
   readonly sql: string;
 }
 
+/**
+ * T3.3 资源台账（设计 §8.6）：每任务每项待清资源一行，逐项幂等执行。
+ * id 由 (taskId, kind, refId) 确定性派生（scheduleCleanup 内计算），同键重复
+ * 登记被主键天然去重；status 只在 pending/done/failed 间推进，失败项带
+ * lastError 可单独重试。expectedState 记录该项应到达的终态（销毁凭据口径）。
+ */
+const MIGRATION_V2 = `
+CREATE TABLE cleanup_items (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('env','workspace','dispatch','terminal')),
+  ref_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  expected_state TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending','done','failed')),
+  last_error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX ix_cleanup_items_task ON cleanup_items(task_id);
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { id: 1, sql: MIGRATION_V1 },
+  { id: 2, sql: MIGRATION_V2 },
 ] as const;
 
 function appliedIds(db: DatabaseSync): number[] {

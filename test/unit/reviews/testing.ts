@@ -407,6 +407,7 @@ export function createReviewHost(): ReviewHost {
   const config: GovConfig = {
     schemaVersion: 1,
     repos: [{ repoId: 'demo', hostPath: path.join(repoRoot, 'repo'), targets: ['main'] }],
+    archiveRoot: path.join(repoRoot, 'archive'),
   };
   const db = openReviewsTestDb();
   const orca = new FakeReviewOrca();
