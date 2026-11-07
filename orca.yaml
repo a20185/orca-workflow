@@ -1,0 +1,14 @@
+# Orca 仓库配置。environmentRecipes 注册 gov 的本地 Docker SSH-mode 环境配方
+# （T2.3）：每任务一个一次性容器，不启动云资源；destroy 走 docker rm -f，
+# 绝不配置 destroy: none。
+#
+# 字段口径（vm recipe doctor 实测）：条目须同时携带 id 与 name 才能被
+# `vm recipe doctor gov-local-docker` 命中；脚本路径须为 ./ 前缀的仓库相对路径
+# 且带可执行位（缺任一项 doctor 报 warn/fail，gov staticDoctor 视为不过）。
+environmentRecipes:
+  - id: gov-local-docker
+    name: gov-local-docker
+    create: ./scripts/orca-vm/create.sh
+    suspend: ./scripts/orca-vm/suspend.sh
+    resume: ./scripts/orca-vm/resume.sh
+    destroy: ./scripts/orca-vm/destroy.sh

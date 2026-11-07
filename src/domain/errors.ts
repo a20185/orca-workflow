@@ -34,6 +34,12 @@ export const GOV_ERROR_CODES = [
   'E_JJ_PATH_OUT_OF_SCOPE',
   'E_JJ_STALE',
   'E_JJ_SCHEMA',
+  // T2.3 环境适配层：创建失败、读写切换失败、生命周期失败、环境不存在与 recipe 输出结构。
+  'E_ENV_CREATE_FAILED',
+  'E_ENV_SWITCH_FAILED',
+  'E_ENV_LIFECYCLE_FAILED',
+  'E_ENV_NOT_FOUND',
+  'E_ENV_SCHEMA',
 ] as const;
 
 export type GovErrorCode = (typeof GOV_ERROR_CODES)[number];
