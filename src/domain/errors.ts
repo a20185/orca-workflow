@@ -9,6 +9,8 @@ export const GOV_ERROR_CODES = [
   'E_TARGET_INVALID',
   'E_CRITERIA_INVALID',
   'E_RUNTIME_UNSUPPORTED',
+  'E_DB_MIGRATION',
+  'E_TRANSITION_INVALID',
 ] as const;
 
 export type GovErrorCode = (typeof GOV_ERROR_CODES)[number];

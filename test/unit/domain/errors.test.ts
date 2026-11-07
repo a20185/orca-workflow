@@ -2,7 +2,7 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { GOV_ERROR_CODES, GovError } from '../../../src/domain/errors.ts';
 
-test('GOV_ERROR_CODES 恰为契约约定的七个错误码', () => {
+test('GOV_ERROR_CODES 恰为契约约定的九个错误码', () => {
   assert.deepEqual(GOV_ERROR_CODES, [
     'E_CONFIG_INVALID',
     'E_SPEC_INVALID',
@@ -11,6 +11,8 @@ test('GOV_ERROR_CODES 恰为契约约定的七个错误码', () => {
     'E_TARGET_INVALID',
     'E_CRITERIA_INVALID',
     'E_RUNTIME_UNSUPPORTED',
+    'E_DB_MIGRATION',
+    'E_TRANSITION_INVALID',
   ]);
 });
 
