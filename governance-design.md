@@ -229,14 +229,13 @@ stateDiagram-v2
     ACTIVE --> REVIEW_REQUESTED: submit
     ACTIVE --> FAILED: task fail 申报业务失败
     ACTIVE --> CANCELLED: 人工取消
-    ACTIVE --> SUPERSEDED: 旧认领已失效
+    ACTIVE --> SUPERSEDED: 新任务版本替代
     WAITING_CHILD --> ACTIVE: 子任务合并且恢复消息已记录
     WAITING_CHILD --> ACTIVE: 子任务取消或失败，不快进父版本
     WAITING_CHILD --> WAITING_CHILD: 子任务被替代，等待目标改绑
     CHANGES_REQUESTED --> REVIEW_REQUESTED: 再次 submit 或 review request
     CHANGES_REQUESTED --> FAILED: task fail
     CHANGES_REQUESTED --> CANCELLED: 人工取消
-    REVIEW_REQUESTED --> FAILED: task fail
     CHANGES_REQUESTED --> WAITING_CHILD: 修复中发现前置问题
     CHANGES_REQUESTED --> SUPERSEDED: 新任务版本替代
     REVIEW_REQUESTED --> IN_REVIEW: 评审 Session accept
@@ -264,7 +263,6 @@ stateDiagram-v2
 | ACTIVE | submit | REVIEW_REQUESTED | 记录版本；等待 merge_ready 后暂停开发环境 |
 | ACTIVE | task fail | FAILED | 确认后允许 worker_done --outcome failed；按 §8.6 清理 |
 | CHANGES_REQUESTED | task fail | FAILED | 同 ACTIVE 的失败动作 |
-| REVIEW_REQUESTED | task fail | FAILED | 先取消未开始的评审，再按失败动作清理 |
 | ACTIVE | task split | WAITING_CHILD | 固定父版本，暂停父环境，创建子任务 |
 | ACTIVE / CHANGES_REQUESTED / REVIEW_REQUESTED / IN_REVIEW | 人工取消 | CANCELLED | 在飞的评审取消并销毁评审资源；结算 Dispatch 后按 §8.6 清理 |
 | ACTIVE / CHANGES_REQUESTED / REVIEW_REQUESTED / IN_REVIEW | 新任务版本替代 | SUPERSEDED | 已启动的评审取消并销毁评审资源；按 §8.6 清理 |
@@ -276,7 +274,7 @@ stateDiagram-v2
 | CHANGES_REQUESTED | task split | WAITING_CHILD | 同 ACTIVE 的 split 动作 |
 | REVIEW_REQUESTED | 评审 Session accept | IN_REVIEW | 评审环境与工作区已在进入 REVIEW_REQUESTED 时创建；accept 仅激活评审 |
 | REVIEW_REQUESTED | 目标移动需 rebase | ACTIVE | 取消未开始的评审；恢复开发环境执行 rebase |
-| REVIEW_REQUESTED | 执行者替换（结算旧 Dispatch 后） | ACTIVE | 旧提交作废；新执行者在保留的工作区上重新提交 |
+| REVIEW_REQUESTED | 执行者替换（结算旧 Dispatch 后） | ACTIVE | 取消并结算未开始的评审 Dispatch，销毁评审资源；旧提交作废；新执行者在保留的工作区上重新提交 |
 | IN_REVIEW | 退回 | CHANGES_REQUESTED | 销毁评审资源；tree 确认后恢复开发环境 |
 | IN_REVIEW | 评审员死亡或中止 | REVIEW_REQUESTED | 销毁评审资源；重建评审环境与新评审 Session |
 | IN_REVIEW | 全部验收通过 | APPROVED | 销毁评审资源 |
@@ -376,7 +374,7 @@ stateDiagram-v2
 
 | 资源 | 销毁时机 |
 |---|---|
-| 评审环境与评审工作区 | 评审结论受理且评审 Dispatch 结算（worker_done 或 release 回执）后销毁，无论通过、退回还是中止；退回后的下一轮提交前必须确认已销毁 |
+| 评审环境与评审工作区 | 有结论的路径：结论受理且评审 Dispatch 结算（worker_done 或 release 回执）后销毁。中止路径（评审员死亡、任务取消或被替代）：对应 Dispatch 经 stop / abandon 结算后即可销毁，无需结论。退回后的下一轮提交前必须确认已销毁 |
 | 失败或取消任务的全部资源 | `task fail` / 人工取消的结算回执与证据归档完成后 |
 | 被替代任务的全部资源 | SUPERSEDED 迁移与归档完成后；在飞的评审同时取消并销毁 |
 | 正常路径资源 | 按 §8.4：合并确认、写入者退出、归档完成后 |
@@ -511,7 +509,7 @@ stateDiagram-v2
 11. 任务执行 Session 需要替换时：取得旧 writer 已退出的明确证据 → `gov` 调用 `worker-stop` 结算旧 Dispatch（结果不确定时取得正面证明后用 `worker-abandon`）→ 旧认领标记为 `FENCED` 并撤销令牌 → 以 `worker-start --retry-of` 重派。新 Dispatch 接受后才能写入；旧提交和评审不能直接转移给新认领。
 12. 父任务有活动子任务时不允许替换父认领，先处理子任务，避免子任务继续指向旧父版本。
 13. 人工验收回执、`worker-stop` / `worker-abandon` / `retry-of` 回执与资源销毁回执均写入操作记录，与外部操作状态一并恢复。
-14. 任务在 REVIEW_REQUESTED 状态替换执行者时：结算旧 Dispatch → 任务回到 ACTIVE → 旧提交作废 → 新执行者在保留的工作区上重新提交。
+14. 任务在 REVIEW_REQUESTED 状态替换执行者时：结算旧执行 Dispatch，取消并结算未开始的评审 Dispatch、销毁评审资源 → 任务回到 ACTIVE → 旧提交作废 → 新执行者在保留的工作区上重新提交。该状态下执行环境处于暂停，业务失败改由人工取消路径处理。
 
 ## 14. 测试与发布标准
 
