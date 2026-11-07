@@ -3,6 +3,14 @@
 v0.2 · 2026-09-14 · pilot run_fe1036f315cb（66b-review#1）全链验证后修订
 适用：公司内网 GitLab（gitlab.daqian369.com）+ 本机 Orca 1.4.190 + Matt Pocock engineering skills
 
+> **已替代文档，仅供历史参考（2026-11-07）**
+>
+> 本 runbook 描述的是已被替代的旧流程，不要再按本文执行任何步骤；现行治理流程以 [governance-design.md](governance-design.md) 与 [governance-tasks.md](governance-tasks.md) 为准。旧流程中以下三处做法已明确不再沿用：
+>
+> 1. **手工 `task-update --status ready` 推进依赖**——父子依赖改由治理侧判定，正常流程不调用 `task-update`（设计决策 D14）。
+> 2. **修复后复审复用原评审终端**——每次提交都新建独立的评审 Session 与评审工作区，不再复用原终端（设计决策 D7）。
+> 3. **开发 worker 自行 push 分支**——开发完成只发送 `merge_ready`，合并由宿主侧治理流程控制（设计决策 D6）。
+
 ## 0. 拓扑与前提
 
 三个会话各司其职，不要混：
