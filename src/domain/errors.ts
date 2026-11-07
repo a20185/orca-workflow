@@ -21,6 +21,11 @@ export const GOV_ERROR_CODES = [
   'E_TIMEOUT',
   'E_ACTION_UNIMPLEMENTED',
   'E_REQUEST_INVALID',
+  // T2.1 Orca CLI 适配层：runtime 门禁、调用失败、结构校验与禁用动词。
+  'E_ORCA_RUNTIME_DOWN',
+  'E_ORCA_CALL_FAILED',
+  'E_ORCA_SCHEMA',
+  'E_ORCA_FORBIDDEN_VERB',
 ] as const;
 
 export type GovErrorCode = (typeof GOV_ERROR_CODES)[number];
