@@ -15,6 +15,12 @@ import { openDatabase } from './db/database.ts';
 import { formatZodIssues, GovError } from './domain/errors.ts';
 import { GOV_ACTIONS_BY_ROLE, GOV_ROLES } from './domain/roles.ts';
 import { issueToken, type TokenInfo } from './auth.ts';
+import { createDeclareHandler } from './services/tasks.ts';
+import {
+  createAcceptHandler,
+  createClaimHandler,
+  type ClaimHandlersDeps,
+} from './services/claims.ts';
 
 export interface ActionContext {
   readonly db: DatabaseSync;
@@ -252,6 +258,8 @@ const tokenIssueHandler: ActionHandler = async (ctx) => {
 export interface CoreHandlerDeps {
   readonly config: GovConfig;
   readonly configPath: string;
+  /** T3.1 声明/认领/接受的端口依赖；注入后三个 handler 才注册（真实适配器注入归 T6.x）。 */
+  readonly claimDeps?: ClaimHandlersDeps | undefined;
 }
 
 /** 注册 T1.3 的三个真实现；其余动作保持未注册（E_ACTION_UNIMPLEMENTED）。 */
@@ -259,4 +267,9 @@ export function registerCoreHandlers(registry: HandlerRegistry, deps: CoreHandle
   registry.registerHandler('doctor', doctorHandler());
   registry.registerHandler('status', statusHandler);
   registry.registerHandler('token-issue', tokenIssueHandler);
+  if (deps.claimDeps !== undefined) {
+    registry.registerHandler('declare', createDeclareHandler(deps.claimDeps));
+    registry.registerHandler('claim', createClaimHandler(deps.claimDeps));
+    registry.registerHandler('accept', createAcceptHandler(deps.claimDeps));
+  }
 }

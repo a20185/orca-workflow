@@ -40,6 +40,12 @@ export const GOV_ERROR_CODES = [
   'E_ENV_LIFECYCLE_FAILED',
   'E_ENV_NOT_FOUND',
   'E_ENV_SCHEMA',
+  // T3.1 认领服务层：并发唯一冲突、准备阶段失败、外部结果不确定、重试耗尽与状态非法。
+  'E_CLAIM_EXISTS',
+  'E_CLAIM_PREP_FAILED',
+  'E_CLAIM_UNCERTAIN',
+  'E_CLAIM_RETRY_EXHAUSTED',
+  'E_CLAIM_STATE_INVALID',
 ] as const;
 
 export type GovErrorCode = (typeof GOV_ERROR_CODES)[number];
