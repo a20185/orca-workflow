@@ -30,6 +30,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import { formatZodIssues, GovError } from '../domain/errors.ts';
+import type { EnvGuardProvision } from '../services/ports.ts';
 import { DEFAULT_JJ_CANDIDATES } from './jj.ts';
 import { DEFAULT_ORCA_PATH } from './orca.ts';
 
@@ -394,7 +395,13 @@ export function createEnvironmentAdapter(options: EnvironmentAdapterOptions = {}
   }
 
   /** 跑配方脚本（execFile + args 数组）；stdin 传生命周期 JSON；写入端 EPIPE 容忍（脚本失败早退时未读 stdin）。 */
-  function runScript(script: string, args: readonly string[], stdin: string | null, timeoutMs: number): Promise<ScriptResult> {
+  function runScript(
+    script: string,
+    args: readonly string[],
+    stdin: string | null,
+    timeoutMs: number,
+    extraEnv: Record<string, string> = {},
+  ): Promise<ScriptResult> {
     return new Promise((resolve) => {
       let settled = false;
       const finish = (r: ScriptResult) => {
@@ -406,7 +413,7 @@ export function createEnvironmentAdapter(options: EnvironmentAdapterOptions = {}
       const child = execFile(
         script,
         [...args],
-        { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8', env: scriptEnv() },
+        { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8', env: { ...scriptEnv(), ...extraEnv } },
         (err, stdout, stderr) => {
           if (err === null) {
             finish({ success: true, stdout, stderr, exitCode: 0 });
@@ -682,8 +689,14 @@ export function createEnvironmentAdapter(options: EnvironmentAdapterOptions = {}
      * 成功返回 envInstanceId（=userData.resourceId，容器名）与 connection。
      * 失败抛 E_ENV_CREATE_FAILED；docker run 成功后的失败保留容器（resourceId 在
      * detail 中）供查明。zod 只校验消费子集。
+     * input.guard（T5.1）提供时经 GOV_GUARD_IDENTITY / GOV_GUARD_ORCA_BUNDLE
+     * 传给 create.sh：容器内部署 guard 身份、真 CLI bundle 与工作区信任种子。
      */
-    async create(input: { readonly workspaceHostPath: string; readonly taskDirRel: string }): Promise<CreateReceipt> {
+    async create(input: {
+      readonly workspaceHostPath: string;
+      readonly taskDirRel: string;
+      readonly guard?: EnvGuardProvision | undefined;
+    }): Promise<CreateReceipt> {
       const ws = requireString(input.workspaceHostPath, 'workspaceHostPath');
       const rel = requireString(input.taskDirRel, 'taskDirRel');
       if (!isAbsolute(ws)) {
@@ -699,9 +712,19 @@ export function createEnvironmentAdapter(options: EnvironmentAdapterOptions = {}
       if (!existsSync(hostWritableDir)) {
         throw new GovError('E_REQUEST_INVALID', `可写子目录不存在: ${hostWritableDir}`);
       }
+      if (input.guard !== undefined && !existsSync(join(input.guard.orcaBundleHostPath, 'out', 'cli'))) {
+        throw new GovError('E_REQUEST_INVALID', `guard.orcaBundleHostPath 缺 out/cli: ${input.guard.orcaBundleHostPath}`);
+      }
+
+      // T5.1 guard 面环境（仅宿主本地进程面传递；缺省不设，create.sh 走 T2.3 原路径）。
+      const guardEnv: Record<string, string> = {};
+      if (input.guard !== undefined) {
+        guardEnv['GOV_GUARD_IDENTITY'] = JSON.stringify(input.guard.identity);
+        guardEnv['GOV_GUARD_ORCA_BUNDLE'] = input.guard.orcaBundleHostPath;
+      }
 
       // create 固定放宽超时：首次运行需要本地构建镜像。
-      const result = await runScript(scriptPaths.create, [ws, rel], null, Math.max(defaultTimeoutMs, 300_000));
+      const result = await runScript(scriptPaths.create, [ws, rel], null, Math.max(defaultTimeoutMs, 300_000), guardEnv);
       if (!result.success) {
         throwScriptFailure('create', result);
       }

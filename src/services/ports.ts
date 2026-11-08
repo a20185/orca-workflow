@@ -26,6 +26,7 @@ import type {
   SwitchReceipt,
 } from '../adapters/environment.ts';
 import { GovError } from '../domain/errors.ts';
+import type { GuardIdentity } from '../guard/contract.ts';
 
 /** Orca 端口：declare 登记 Orca 任务，claim 启动 worker（重派带 retryOf）。 */
 export interface OrcaPort {
@@ -56,11 +57,24 @@ export interface JjPort {
   workspaceForget(name: string): Promise<{ ok: true; name: string; opIds: string[] }>;
 }
 
+/**
+ * T5.1 guard 面部署输入（设计 §9.2 第 5 条）：create 时把 guard 身份与真 CLI
+ * bundle 落进容器（identity.json broker 0600；bundle → /opt/orca-broker/cli）。
+ * 身份字段由 claim/review 流程产出，绝不来自调用方环境。
+ */
+export interface EnvGuardProvision {
+  readonly identity: GuardIdentity;
+  /** 真 CLI bundle 宿主目录（含 out/{cli,shared,main} 与 node_modules）。 */
+  readonly orcaBundleHostPath: string;
+}
+
 /** 环境端口：claim 建/销一次性容器，accept 切可写/只读。 */
 export interface EnvPort {
   create(input: {
     readonly workspaceHostPath: string;
     readonly taskDirRel: string;
+    /** T5.1：提供时 create.sh 部署 guard 面 + 工作区信任种子；缺省时行为不变。 */
+    readonly guard?: EnvGuardProvision | undefined;
   }): Promise<CreateReceipt>;
   setWritable(envId: string): Promise<SwitchReceipt>;
   setReadonly(envId: string): Promise<SwitchReceipt>;

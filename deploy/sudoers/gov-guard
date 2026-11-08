@@ -1,0 +1,5 @@
+# T5.1 受限启动器唯一 sudo 入口（仅容器内生效；宿主 sudo 配置不动）。
+# 任务用户(task)只能以 orca-broker 身份运行固定路径的 guard——参数不设限
+# （命令匹配不含参数），动作面由 guard 白名单 + gov guard-authorize 双层裁决。
+# 镜像内其余 sudoers 面不含任何 NOPASSWD 条目（隔离测试断言）。
+task ALL=(orca-broker) NOPASSWD: /usr/local/lib/gov/guard

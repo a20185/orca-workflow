@@ -1,0 +1,6 @@
+#!/bin/sh
+# T5.1 preamble 垫片（root:root 0755，/usr/local/bin/orca）：Orca 注入给 worker
+# 的 preamble 命令是裸命令名 `orca`，经 PATH 解析到此。唯一去向是 sudo 垫入
+# orca-broker 的受限启动器；本脚本不含任何旁路。gov 动作请直接调
+# `sudo -u orca-broker /usr/local/lib/gov/guard gov ...`。
+exec sudo -n -u orca-broker /usr/local/lib/gov/guard orca "$@"

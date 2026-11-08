@@ -9,6 +9,12 @@
 #   GOV_VM_IMAGE_TAG    本地构建镜像 tag（默认 gov-local-docker-sshd:latest）
 #   GOV_VM_KEYROOT      SSH 密钥根目录（默认 /tmp/gov-vm-keys；临时资源只在 /tmp）
 #   GOV_VM_SSH_WAIT_SECS sshd 端口就绪等待上限秒数（默认 25）
+#   GOV_GUARD_ORCA_BUNDLE 真 CLI bundle 宿主目录（含 out/{cli,shared,main} 与
+#                        node_modules；T5.1 部署步骤，拷入容器 /opt/orca-broker/cli）
+#   GOV_GUARD_IDENTITY  guard 身份 JSON（govToken/govBaseUrl/taskId/claimId/
+#                        terminalHandle/dispatchId/orcaPairingCode；broker 0600 落
+#                        /var/lib/orca-broker/identity.json）
+#   两者都缺省时行为与 T2.3 完全一致（不部署 guard 面）。
 #
 # stdout 仅最终 JSON。成功：SSH-mode recipe（connection + userData.resourceId），
 # userData.resourceId = 容器名（官方 docker-ssh 参考字段，destroy 据此 docker rm -f）。
@@ -82,13 +88,31 @@ ssh-keygen -q -t ed25519 -N '' -f "$KEYDIR/id_ed25519" >/dev/null 2>&1 \
 PUBKEY="$(cat "$KEYDIR/id_ed25519.pub")"
 
 # --- 镜像：预构建名优先，否则按需本地构建（利用层缓存） --------------------
+# 构建上下文在 /tmp 组装（仓库不进 .gitignore 改动）：Dockerfile 引用的
+# guard.mjs / sudoers / orca 垫片从仓库真源拷入，保证镜像面与 src/guard 同源。
+stage_buildctx() {
+  local ctx
+  ctx="$(mktemp -d "${TMPDIR:-/tmp}/gov-vm-buildctx-XXXXXX")"
+  cp "$SCRIPT_DIR/Dockerfile" "$SCRIPT_DIR/entrypoint.sh" "$ctx/" \
+    || { rm -rf "$ctx"; return 1; }
+  cp "$SCRIPT_DIR/orca-shim" "$ctx/orca-shim" || { rm -rf "$ctx"; return 1; }
+  cp "$SCRIPT_DIR/../../src/guard/guard.mjs" "$ctx/guard.mjs" || { rm -rf "$ctx"; return 1; }
+  cp "$SCRIPT_DIR/../../deploy/sudoers/gov-guard" "$ctx/gov-guard.sudoers" || { rm -rf "$ctx"; return 1; }
+  printf '%s' "$ctx"
+}
+
 if [ -n "${GOV_VM_IMAGE:-}" ]; then
   IMAGE="$GOV_VM_IMAGE"
 else
   IMAGE="$IMAGE_TAG"
   if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-    log "镜像不存在，本地构建 $IMAGE"
-    docker build -t "$IMAGE" "$SCRIPT_DIR" >&2 || emit_fail 'docker-build' "镜像构建失败" "$NAME"
+    BUILDCTX="$(stage_buildctx)" || emit_fail 'docker-build' "组装构建上下文失败（缺 guard/sudoers 真源文件）" "-"
+    log "镜像不存在，本地构建 ${IMAGE}（ctx=${BUILDCTX}）"
+    if ! docker build -t "$IMAGE" "$BUILDCTX" >&2; then
+      rm -rf "$BUILDCTX"
+      emit_fail 'docker-build' "镜像构建失败" "$NAME"
+    fi
+    rm -rf "$BUILDCTX"
   fi
 fi
 
@@ -136,6 +160,68 @@ done
 if [ -z "$PORT" ]; then
   docker logs "$NAME" >&2 || true
   emit_fail 'ssh-wait' "sshd 端口 ${WAIT_SECS}s 内未就绪（容器保留供查明）" "$NAME"
+fi
+
+# --- T5.1 guard 面部署（GOV_GUARD_* 缺省时整段跳过，行为与 T2.3 一致） -----
+# 步骤：真 CLI bundle 拷入 broker 0700 目录 + bin/orca 包装脚本 + 身份文件
+# （broker 0600）+ 任务用户工作区信任种子（/work 预信任，T2.1 实证口径）。
+# 全部经 docker cp / docker exec -u 0 完成，不经容器内 shell 拼接凭据。
+guard_provision() {
+  local stage_tmp rc
+  stage_tmp="$(mktemp -d "${TMPDIR:-/tmp}/gov-vm-guard-XXXXXX")"
+  rc=0
+
+  if [ -n "${GOV_GUARD_ORCA_BUNDLE:-}" ]; then
+    if [ ! -d "$GOV_GUARD_ORCA_BUNDLE/out/cli" ]; then
+      rm -rf "$stage_tmp"; emit_fail 'guard-provision' "GOV_GUARD_ORCA_BUNDLE 缺 out/cli: $GOV_GUARD_ORCA_BUNDLE" "$NAME"
+    fi
+    docker cp "$GOV_GUARD_ORCA_BUNDLE/." "$NAME:/opt/orca-broker/cli/" >/dev/null 2>&1 || rc=1
+    # bin/orca 包装：真 CLI 入口（bundle 内 out/cli/index.js 以纯 Node 运行）。
+    printf '%s\n' \
+      '#!/bin/sh' \
+      'exec /usr/local/bin/node /opt/orca-broker/cli/out/cli/index.js "$@"' \
+      > "$stage_tmp/orca"
+    docker cp "$stage_tmp/orca" "$NAME:/opt/orca-broker/bin/orca" >/dev/null 2>&1 || rc=1
+    docker exec -u 0 "$NAME" sh -c \
+      'chown -R orca-broker:orca-broker /opt/orca-broker && chmod 0700 /opt/orca-broker && chmod 0755 /opt/orca-broker/bin/orca' \
+      >/dev/null 2>&1 || rc=1
+    # 可执行性验证：broker 身份能拿到 CLI 版本号。
+    docker exec -u 1200 "$NAME" /opt/orca-broker/bin/orca --version >/dev/null 2>&1 || rc=1
+  fi
+
+  if [ -n "${GOV_GUARD_IDENTITY:-}" ]; then
+    case "$GOV_GUARD_IDENTITY" in
+      '{'*'}') ;;
+      *) rm -rf "$stage_tmp"; emit_fail 'guard-provision' "GOV_GUARD_IDENTITY 不是 JSON 对象" "$NAME" ;;
+    esac
+    printf '%s' "$GOV_GUARD_IDENTITY" > "$stage_tmp/identity.json"
+    docker cp "$stage_tmp/identity.json" "$NAME:/var/lib/orca-broker/identity.json" >/dev/null 2>&1 || rc=1
+    docker exec -u 0 "$NAME" sh -c \
+      'chown orca-broker:orca-broker /var/lib/orca-broker/identity.json && chmod 0600 /var/lib/orca-broker/identity.json' \
+      >/dev/null 2>&1 || rc=1
+  fi
+
+  # 工作区信任种子：容器内任务用户的 Claude 配置预信任 /work（T2.1 同口径
+  # hasTrustDialogAccepted；首个 agent 不会死于 agent-trust-workspace 信任门）。
+  if [ -n "${GOV_GUARD_ORCA_BUNDLE:-}" ] || [ -n "${GOV_GUARD_IDENTITY:-}" ]; then
+    printf '%s\n' \
+      '{"projects":{"/work":{"hasTrustDialogAccepted":true}}}' \
+      > "$stage_tmp/claude.json"
+    docker cp "$stage_tmp/claude.json" "$NAME:/home/task/.claude.json" >/dev/null 2>&1 || rc=1
+    docker exec -u 0 "$NAME" sh -c \
+      'chown 1000:1000 /home/task/.claude.json && chmod 0644 /home/task/.claude.json' \
+      >/dev/null 2>&1 || rc=1
+  fi
+
+  rm -rf "$stage_tmp"
+  if [ "$rc" != 0 ]; then
+    emit_fail 'guard-provision' "guard 面部署失败（容器保留供查明）" "$NAME"
+  fi
+}
+
+if [ -n "${GOV_GUARD_ORCA_BUNDLE:-}" ] || [ -n "${GOV_GUARD_IDENTITY:-}" ]; then
+  log "部署 T5.1 guard 面（bundle=${GOV_GUARD_ORCA_BUNDLE:-无} identity=$([ -n "${GOV_GUARD_IDENTITY:-}" ] && printf 有 || printf 无)）"
+  guard_provision
 fi
 
 # --- accept 前只读：宿主把可写区置 0000（0 权限在任何所有权映射下拒所有人） --

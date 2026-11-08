@@ -40,6 +40,7 @@ import {
   type RecoveryHandlersDeps,
 } from './services/recovery.ts';
 import { createSplitHandler, type ChildrenHandlersDeps } from './services/children.ts';
+import { createGuardAuthorizeHandler } from './guard/guard-authorize.ts';
 
 export interface ActionContext {
   readonly db: DatabaseSync;
@@ -69,10 +70,11 @@ export function createHandlerRegistry(): HandlerRegistry {
   };
 }
 
-/** §9.1 全部动作名；token-issue 是引导型签发动作，随 doctor 一并视为合法名。 */
+/** §9.1 全部动作名；token-issue 是引导型签发动作，guard-authorize 是 T5.1 受限启动器的授权动作，均随 doctor 一并视为合法名。 */
 const KNOWN_ACTION_NAMES: readonly string[] = [
   ...new Set(Object.values(GOV_ACTIONS_BY_ROLE).flat()),
   'token-issue',
+  'guard-authorize',
 ];
 
 export function isValidActionName(action: string): boolean {
@@ -310,6 +312,8 @@ export function registerCoreHandlers(registry: HandlerRegistry, deps: CoreHandle
   registry.registerHandler('doctor', doctorHandler());
   registry.registerHandler('status', statusHandler);
   registry.registerHandler('token-issue', tokenIssueHandler);
+  // T5.1：guard-authorize 只依赖库与令牌事实，无条件注册；角色/绑定门在 handler 内。
+  registry.registerHandler('guard-authorize', createGuardAuthorizeHandler());
   if (deps.claimDeps !== undefined) {
     registry.registerHandler('declare', createDeclareHandler(deps.claimDeps));
     registry.registerHandler('claim', createClaimHandler(deps.claimDeps));
