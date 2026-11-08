@@ -34,6 +34,11 @@ import {
   createReviewSubmitHandler,
 } from './services/reviews.ts';
 import type { EnvLifecyclePort, JjVersionPort, OrcaMessagingPort } from './services/ports.ts';
+import {
+  createOperationResumeHandler,
+  createOperationShowHandler,
+  type RecoveryHandlersDeps,
+} from './services/recovery.ts';
 
 export interface ActionContext {
   readonly db: DatabaseSync;
@@ -284,6 +289,13 @@ export interface CoreHandlerDeps {
     readonly env: EnvLifecyclePort;
     readonly stepTimeoutMs?: number | undefined;
   } | undefined;
+  /**
+   * T4.1 恢复层端口依赖（operation-show / operation-resume 的真实现）：Orca
+   * 结算+事实面、jj 合并+事实面、环境生命周期面与可选只读容器事实/Run 归属。
+   * 注入后两个 operator 动作才注册；其余恢复动作（替换/替代/协调恢复）不占
+   * §9.1 动作名，由编排层直调服务。
+   */
+  readonly recoveryDeps?: RecoveryHandlersDeps | undefined;
 }
 
 /** 注册 T1.3 的三个真实现；其余动作保持未注册（E_ACTION_UNIMPLEMENTED）。 */
@@ -316,5 +328,9 @@ export function registerCoreHandlers(registry: HandlerRegistry, deps: CoreHandle
       createReviewSubmitHandler({ config: deps.config, orca: rd.orca, jj: rd.jj, env: rd.env, ...timeoutOpts }),
     );
     registry.registerHandler('manual-approve', createManualApproveHandler());
+  }
+  if (deps.recoveryDeps !== undefined) {
+    registry.registerHandler('operation-show', createOperationShowHandler(deps.recoveryDeps));
+    registry.registerHandler('operation-resume', createOperationResumeHandler(deps.recoveryDeps));
   }
 }

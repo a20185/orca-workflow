@@ -9,12 +9,14 @@
  */
 import type {
   createOrcaAdapter,
+  RunReceipt,
   TaskReceipt,
+  WorkerListReceipt,
   WorkerSettleReceipt,
   WorkerShowReceipt,
   WorkerStartReceipt,
 } from '../adapters/orca.ts';
-import type { createJjAdapter } from '../adapters/jj.ts';
+import type { WorkspaceEntry, createJjAdapter } from '../adapters/jj.ts';
 import type {
   createEnvironmentAdapter,
   CreateReceipt,
@@ -218,3 +220,47 @@ const _orcaSettlementAdapterIsPortable: OrcaSettlementPort = undefined as unknow
 >;
 void _jjMergeAdapterIsPortable;
 void _orcaSettlementAdapterIsPortable;
+
+// ---------------------------------------------------------------------------
+// T4.1 恢复层扩展端口：只读外部事实查询（verify-external 的查明面）与协调
+// Run 会话重绑。全部无副作用；容器存在性查询不在 T2.3 适配器面内（该适配器
+// 无只读 exists 动词，destroy 是副作用不可用作探针），由调用方注入实现，
+// 缺席时恢复层对容器事实如实返回 unknown。
+// ---------------------------------------------------------------------------
+
+/** jj 只读事实端口：workspace 注册清单（T2.2 适配器逐字同形）。 */
+export interface JjFactsPort {
+  workspaceList(): Promise<{ ok: true; workspaces: WorkspaceEntry[] }>;
+}
+
+/**
+ * Orca 只读事实与 Run 会话端口：workerList 用于「无回执的派工」发现（按任务
+ * 归属筛选）；runUse 是协调 Session 恢复的重绑动作（幂等）；runCurrent 供
+ * recoverCoordinator 回报当前绑定。
+ */
+export interface OrcaFactsPort {
+  runUse(runId: string): Promise<{ ok: true; raw: RunReceipt }>;
+  runCurrent(): Promise<{ ok: true; raw: RunReceipt }>;
+  workerList(input?: { readonly run?: string; readonly limit?: number } | undefined): Promise<{
+    ok: true;
+    raw: WorkerListReceipt;
+  }>;
+}
+
+/**
+ * 环境只读事实端口：容器存在性（按 envInstanceId）与按工作区挂载反查容器名
+ * （env.create 结果不确定时 gov 不持有 envInstanceId，只能从挂载面发现）。
+ */
+export interface EnvFactsPort {
+  exists(envId: string): Promise<boolean>;
+  findByWorkspace(workspaceHostPath: string, taskDirRel: string): Promise<string | null>;
+}
+
+const _jjFactsAdapterIsPortable: JjFactsPort = undefined as unknown as ReturnType<
+  typeof createJjAdapter
+>;
+const _orcaFactsAdapterIsPortable: OrcaFactsPort = undefined as unknown as ReturnType<
+  typeof createOrcaAdapter
+>;
+void _jjFactsAdapterIsPortable;
+void _orcaFactsAdapterIsPortable;

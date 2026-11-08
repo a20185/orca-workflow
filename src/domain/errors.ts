@@ -62,6 +62,11 @@ export const GOV_ERROR_CODES = [
   'E_MERGE_UNCERTAIN',
   'E_ARCHIVE_FAILED',
   'E_CLEANUP_FAILED',
+  // T4.1 恢复层：未经查明外部事实的恢复处置、旧 writer 仍存活时禁止替换、
+  // 以及操作/任务/认领处于不可恢复处置的状态。
+  'E_RECOVERY_UNVERIFIED',
+  'E_RECOVERY_WRITER_ALIVE',
+  'E_RECOVERY_STATE_INVALID',
 ] as const;
 
 export type GovErrorCode = (typeof GOV_ERROR_CODES)[number];
