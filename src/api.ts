@@ -39,6 +39,7 @@ import {
   createOperationShowHandler,
   type RecoveryHandlersDeps,
 } from './services/recovery.ts';
+import { createSplitHandler, type ChildrenHandlersDeps } from './services/children.ts';
 
 export interface ActionContext {
   readonly db: DatabaseSync;
@@ -296,6 +297,12 @@ export interface CoreHandlerDeps {
    * §9.1 动作名，由编排层直调服务。
    */
   readonly recoveryDeps?: RecoveryHandlersDeps | undefined;
+  /**
+   * T4.2 父子任务端口依赖（split 动作的真实现；jj 需附带父版本快进扩展端口，
+   * 适配器面外的动词由调用方注入）。注入后 executor 动作 split 才注册；
+   * resumeParent/completeChildTask 为编排层内部入口，不占 §9.1 动作名。
+   */
+  readonly childrenDeps?: ChildrenHandlersDeps | undefined;
 }
 
 /** 注册 T1.3 的三个真实现；其余动作保持未注册（E_ACTION_UNIMPLEMENTED）。 */
@@ -332,5 +339,8 @@ export function registerCoreHandlers(registry: HandlerRegistry, deps: CoreHandle
   if (deps.recoveryDeps !== undefined) {
     registry.registerHandler('operation-show', createOperationShowHandler(deps.recoveryDeps));
     registry.registerHandler('operation-resume', createOperationResumeHandler(deps.recoveryDeps));
+  }
+  if (deps.childrenDeps !== undefined) {
+    registry.registerHandler('split', createSplitHandler(deps.childrenDeps));
   }
 }

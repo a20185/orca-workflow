@@ -67,6 +67,12 @@ export const GOV_ERROR_CODES = [
   'E_RECOVERY_UNVERIFIED',
   'E_RECOVERY_WRITER_ALIVE',
   'E_RECOVERY_STATE_INVALID',
+  // T4.2 父子任务层：子任务路径越出父范围、子任务深度超限、父已有活动子任务
+  //（首版单阻塞）与子任务基线/提交与父锁定版本不符（父版本分叉于子目标面）。
+  'E_CHILD_SCOPE_INVALID',
+  'E_CHILD_DEPTH_EXCEEDED',
+  'E_CHILD_EXISTS',
+  'E_PARENT_DIVERGED',
 ] as const;
 
 export type GovErrorCode = (typeof GOV_ERROR_CODES)[number];

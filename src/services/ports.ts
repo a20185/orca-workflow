@@ -264,3 +264,32 @@ const _orcaFactsAdapterIsPortable: OrcaFactsPort = undefined as unknown as Retur
 >;
 void _jjFactsAdapterIsPortable;
 void _orcaFactsAdapterIsPortable;
+
+// ---------------------------------------------------------------------------
+// T4.2 父子任务扩展端口：父版本祖先判定与父工作副本快进。T2.2 适配器面没有
+// 这两个动词（无 jj edit / 无裸祖先查询），因此不设编译期同形守卫——与
+// EnvFactsPort 同规：由调用方注入实现（集成夹具以真实 jj CLI 实现；生产
+// 适配器接线归 T6.x）。服务层本身仍禁止派生进程。
+// ---------------------------------------------------------------------------
+
+/**
+ * jj 父版本快进端口（T4.2）：`ancestor::descendant` 区间非空判定（jj 0.41
+ * 实测口径，与 moveBookmarkFF 的快进预检同源），以及把指定工作目录的工作
+ * 副本前进到 rev（实现用 `jj edit -r`，与 T3.3 评审工作区夹具同口径）。
+ */
+export interface JjChildAdvancePort {
+  /** ancestor 是 descendant 的祖先或两者相等时 true。 */
+  isAncestorOrEqual(input: {
+    readonly ancestor: string;
+    readonly descendant: string;
+  }): Promise<{ ok: true; result: boolean }>;
+  /**
+   * 快进父工作副本：expectedCurrent 是调用方锁定的父版本，工作副本已不在该
+   * 版本时抛 E_JJ_TARGET_MOVED（不覆盖）；成功后返回工作副本新锚与 op 回执。
+   */
+  advanceWorkingCopy(input: {
+    readonly dir: string;
+    readonly rev: string;
+    readonly expectedCurrent: string;
+  }): Promise<{ ok: true; commitId: string; opIds: string[] }>;
+}
