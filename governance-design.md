@@ -462,7 +462,7 @@ stateDiagram-v2
 3. 真实 Orca CLI、配对信息和受限启动器由 root 或 `orca-broker` 用户持有；`sudoers` 只允许 Agent 调用固定启动器，且禁止环境变量继承和参数中的 shell 展开。镜像移除其他不需要的 setuid/setgid 可执行文件，sudo 配置只存在于测试容器，不修改宿主配置。
 4. `.jj`、`.git` 的写保护由双层挂载提供（工作区根只读 + 任务路径读写，2026-11-07 实证 EROFS 全拒）；读保护由遮蔽挂载提供（空 tmpfs 覆盖 `/work/.jj` 与 `/work/.git`，读取返回不存在）——不得依赖宿主 chmod，Docker Desktop macOS 上 DAC 会被架空。宿主 `gov` 独占 jj 操作。
 5. 宿主不挂载 Docker socket、个人配置目录、版本管理凭据或其他任务目录。
-6. 每个容器配置 CPU、内存、进程数和磁盘上限；全局构建并发单独限制。
+6. 每个容器配置 CPU、内存、进程数上限与 capability 姿态：`--cap-drop=ALL` 加实测必要的六项 capability（SETUID/SETGID/CHOWN/FOWNER/DAC_READ_SEARCH/AUDIT_WRITE），任务用户 CapEff 恒为空集；`no-new-privileges` 经实测与 guard 的 sudo 唯一入口互斥（2026-11-10 证伪，弃用，详见 deploy/README.md）。磁盘无 run 级配额（Docker Desktop 存储驱动不支持，已知缺口）；全局构建并发单独限制；容器间默认 bridge 互通未隔离（已知缺口，仅保证 /work 路径互访不可达）。
 7. 控制通道只允许访问 `gov` 的任务 API，不允许 Agent 直接访问通用 Orca 管理接口。
 8. 文件路径、符号链接、归档大小和输出大小都在边界检查；容器内任务用户创建的符号链接是合法产物但必须列入审计与清理清单（读穿可行、写穿必拒，2026-11-07 实证）。
 
