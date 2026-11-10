@@ -44,7 +44,7 @@ port_open() {
 }
 PORT=''
 for _ in $(seq 1 "$WAIT_SECS"); do
-  LINE_PORT="$(docker port "$RID" 22 2>/dev/null | head -n1 || true)"
+  LINE_PORT="$(docker port "$RID" 2222 2>/dev/null | head -n1 || true)"
   PORT="${LINE_PORT##*:}"
   case "$PORT" in
     ''|*[!0-9]*) PORT=''; sleep 1; continue ;;
