@@ -10,6 +10,10 @@
  * 原文截断到 4 KiB（适配器不向 CLI 传递任何环境变量或凭据，原文本身不含敏感值）。
  * worker-start 的失败/不确定结局是「回执」而非异常：CLI 以 ok:true + state:failed
  * 返回 failedStage 与 residualResources，由调用方按回执处置。
+ * 注意（2026-11-14 实测）：桌面 11-10 更新（1.4.255）已不再遵守该形态——运行期失败
+ * 改为 ok:false + result 载荷（无 error 对象，exit 1），本适配器按信封规则抛
+ * E_ORCA_CALL_FAILED；是否恢复「失败即回执」契约属未裁决的语义分叉，见
+ * execution/adapter-drift-fix-report.md。
  */
 import { execFile } from 'node:child_process';
 import { realpathSync } from 'node:fs';
@@ -131,9 +135,11 @@ export class OrcaAdapterError extends GovError {
 // Orca 新增字段；必填字段缺失或类型不符 → E_ORCA_SCHEMA 并保留原文引用。
 // ---------------------------------------------------------------------------
 
+// 桌面 11-10 更新起 run/task 系动词的信封不再携带顶层 id（status 仍带）；
+// id 降为可选（双形态宽容），ok/result/error 结构维持 strict。
 const envelopeSchema = z
   .object({
-    id: z.string(),
+    id: z.string().optional(),
     ok: z.boolean(),
     result: z.unknown().optional(),
     error: z
@@ -163,27 +169,60 @@ const statusResultSchema = z
   })
   .passthrough();
 
+// run 系回执双形态（桌面 11-10 更新漂移，探针实测 2026-11-13）：
+//   旧（≤1.4.238）：result.run 嵌套 {id, objective, coordinator_handle}
+//   新（1.4.255）：result 顶层扁平 {runId, objective}，coordinator_handle 已消失
+// union 优先匹配新形态，归一为消费侧规范位 result.run.{id, objective}，
+// coordinator_handle 仅旧形态提供 → 可选。多余字段维持 passthrough。
 const runShape = z
   .object({
     id: nonEmpty,
     objective: z.string(),
-    coordinator_handle: z.string(),
+    coordinator_handle: z.string().optional(),
   })
   .passthrough();
 
-const runResultSchema = z.object({ run: runShape }).passthrough();
+const runObjectResult = z.object({ run: runShape }).passthrough();
 
-const taskResultSchema = z
+const runResultSchema = z.union([
+  z
+    .object({ runId: nonEmpty, objective: z.string() })
+    .passthrough()
+    .transform((d): z.infer<typeof runObjectResult> => ({ run: { id: d.runId, objective: d.objective } })),
+  z
+    .object({
+      run: z.object({ id: nonEmpty, objective: z.string(), coordinator_handle: z.string() }).passthrough(),
+    })
+    .passthrough()
+    .transform((d): z.infer<typeof runObjectResult> => ({ run: d.run })),
+]);
+
+// task-create 回执双形态（同次更新漂移）：
+//   旧：result.task 嵌套 {id, run_id, status}
+//   新：result 顶层扁平 {taskId, status}，run_id 已消失（任务归属由当前 coordinator 绑定隐含）
+// 归一为消费侧规范位 result.task.{id, status}，run_id 仅旧形态提供 → 可选。
+const taskShape = z
   .object({
-    task: z
-      .object({
-        id: nonEmpty,
-        run_id: nonEmpty,
-        status: z.string(),
-      })
-      .passthrough(),
+    id: nonEmpty,
+    run_id: nonEmpty.optional(),
+    status: z.string(),
   })
   .passthrough();
+
+const taskObjectResult = z.object({ task: taskShape }).passthrough();
+
+const taskResultSchema = z.union([
+  z
+    .object({ taskId: nonEmpty, status: z.string() })
+    .passthrough()
+    .transform((d): z.infer<typeof taskObjectResult> => ({ task: { id: d.taskId, status: d.status } })),
+  z
+    .object({
+      task: z.object({ id: nonEmpty, run_id: nonEmpty, status: z.string() }).passthrough(),
+    })
+    .passthrough()
+    .transform((d): z.infer<typeof taskObjectResult> => ({ task: d.task })),
+]);
 
 const resourceEffectSchema = z
   .object({
@@ -208,13 +247,18 @@ const workerStartResultSchema = z
   })
   .passthrough();
 
-const workerShowResultSchema = z
+// worker-show 回执双形态（桌面 11-10 更新漂移）：
+//   旧：{dispatch:{id,taskId,status}, worker:{dispatchId,state}} 嵌套
+//   新：{dispatchId, taskId, runId?, state, stage?, liveness?, attention?, waitingOnHuman?, lastError?} 扁平
+// 归一为消费侧规范位 worker.state（消费方只读 worker.state/dispatch.id）；新形态无
+// dispatch.status → 可选。多余字段（stage/liveness/attention 等）维持 passthrough。
+const workerShowCanonical = z
   .object({
     dispatch: z
       .object({
         id: nonEmpty,
         taskId: nonEmpty,
-        status: z.string(),
+        status: z.string().optional(),
       })
       .passthrough(),
     worker: z
@@ -226,21 +270,61 @@ const workerShowResultSchema = z
   })
   .passthrough();
 
+const workerShowResultSchema = z.union([
+  z
+    .object({
+      dispatchId: nonEmpty,
+      taskId: nonEmpty,
+      state: z.string(),
+      stage: z.string().optional(),
+      lastError: z.string().optional(),
+    })
+    .passthrough()
+    .transform((d): z.infer<typeof workerShowCanonical> => ({
+      dispatch: { id: d.dispatchId, taskId: d.taskId },
+      worker: {
+        dispatchId: d.dispatchId,
+        state: d.state,
+        ...(d.stage !== undefined ? { stage: d.stage } : {}),
+        ...(d.lastError !== undefined ? { lastError: d.lastError } : {}),
+      },
+    })),
+  workerShowCanonical,
+]);
+
+// worker-list 行双形态（桌面 11-10 更新漂移）：
+//   旧行：{dispatchId, taskId, workerState, dispatchStatus, agentTerminalHandle?}
+//   新行：{dispatchId, taskId, state, liveness, host, attention[]}（dispatchStatus 消失）
+// 归一为消费侧规范位 workerState（新行的 state 重命名而来），dispatchStatus 仅旧形态提供 → 可选。
+const workerRowCanonical = z
+  .object({
+    dispatchId: nonEmpty,
+    taskId: nonEmpty,
+    workerState: z.string(),
+    dispatchStatus: z.string().optional(),
+    agentTerminalHandle: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+const workerRowSchema = z.union([
+  z
+    .object({ dispatchId: nonEmpty, taskId: nonEmpty, state: nonEmpty })
+    .passthrough()
+    .transform((d): z.infer<typeof workerRowCanonical> => ({ ...d, workerState: d.state })),
+  z
+    .object({
+      dispatchId: nonEmpty,
+      taskId: nonEmpty,
+      workerState: z.string(),
+      dispatchStatus: z.string(),
+      agentTerminalHandle: z.string().nullable().optional(),
+    })
+    .passthrough(),
+]);
+
 const workerListResultSchema = z
   .object({
-    workers: z
-      .array(
-        z
-          .object({
-            dispatchId: nonEmpty,
-            taskId: nonEmpty,
-            workerState: z.string(),
-            dispatchStatus: z.string(),
-            agentTerminalHandle: z.string().nullable().optional(),
-          })
-          .passthrough(),
-      )
-      .optional(),
+    workers: z.array(workerRowSchema).optional(),
     counts: z.record(z.string(), z.number()).optional(),
   })
   .passthrough();
@@ -284,12 +368,15 @@ const messageShape = z
 
 const messageResultSchema = z.object({ message: messageShape }).passthrough();
 
+// check 回执双形态（桌面 11-10 更新漂移）：旧形态每批带 deliveryId/count 且需
+// 下次 --ack 确认；新形态默认「返回即标记已处理」，空/超时批不带 deliveryId/count
+//（--ack 仅作为对旧版 Orca 未标记批的兼容口）。两者均宽容为可选，messages 仍必填。
 const checkResultSchema = z
   .object({
     runId: z.string().optional(),
-    deliveryId: z.string().nullable(),
+    deliveryId: z.string().nullable().optional(),
     messages: z.array(messageShape),
-    count: z.number().int(),
+    count: z.number().int().optional(),
     acknowledged: z.string().nullable().optional(),
     timedOut: z.boolean().optional(),
   })

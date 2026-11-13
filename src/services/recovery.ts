@@ -866,7 +866,8 @@ export interface SupersedeTaskResult {
 export interface RecoverCoordinatorResult {
   readonly runId: string;
   readonly objective: string;
-  readonly coordinatorHandle: string;
+  // 桌面 11-10 更新后 run 系回执不再返回 coordinator_handle（双形态归一后仅旧形态提供）。
+  readonly coordinatorHandle: string | undefined;
   readonly govDataUntouched: true;
 }
 

@@ -27,7 +27,7 @@ import type { GovConfig } from '../../../src/config.ts';
 import { openDatabase } from '../../../src/db/database.ts';
 import { migrate } from '../../../src/db/migrations.ts';
 import { GovError } from '../../../src/domain/errors.ts';
-import type { WorkerSettleReceipt, WorkerShowReceipt, WorkerStartReceipt } from '../../../src/adapters/orca.ts';
+import type { TaskReceipt, WorkerSettleReceipt, WorkerShowReceipt, WorkerStartReceipt } from '../../../src/adapters/orca.ts';
 import { createJjAdapter, type JjAdapter } from '../../../src/adapters/jj.ts';
 import {
   createEnvironmentAdapter,
@@ -339,7 +339,7 @@ export class DispatchOrcaShim implements OrcaSettlementPort {
     readonly taskTitle?: string | undefined;
     readonly deps?: readonly string[] | undefined;
     readonly parent?: string | undefined;
-  }): Promise<{ ok: true; raw: { task: { id: string; run_id: string; status: string } } }> {
+  }): Promise<{ ok: true; raw: TaskReceipt }> {
     this.taskCreateCalls.push({ spec: input.spec });
     // 任务书摘要追加受控执行指令：Orca 任务自足（check 一次 + worker_done）。
     return this.real.taskCreate({

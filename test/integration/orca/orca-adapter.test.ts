@@ -247,7 +247,10 @@ test('task-create：任务落在当前 Run', async () => {
   const created = await adapter.taskCreate({ spec: WORKER_SPEC, taskTitle: `gov-t21-it-${stamp}` });
   assert.equal(created.ok, true);
   assert.ok(created.raw.task.id.startsWith('task_'));
-  assert.equal(created.raw.task.run_id, ctx.runId);
+  // 双形态：新回执（桌面 11-10 起）不再返回 run_id；旧形态返回时必须等于当前 Run。
+  if (created.raw.task.run_id !== undefined) {
+    assert.equal(created.raw.task.run_id, ctx.runId);
+  }
   assert.equal(created.raw.task.status, 'ready');
   ctx.taskId = created.raw.task.id;
 
@@ -363,15 +366,18 @@ test('checkRun --wait：收到 worker_done（outcome=failed）并 ack', async ()
     timeoutMs: 300_000,
   });
   assert.equal(waited.ok, true);
-  assert.ok(waited.raw.deliveryId !== null && waited.raw.deliveryId !== undefined);
   const done = waited.raw.messages.find((m) => m.type === 'worker_done');
   assert.ok(done !== undefined, '应收到 worker_done');
   assert.ok((done.payload ?? '').includes('"outcome":"failed"'));
   assert.ok((done.payload ?? '').includes(req(ctx.dispatchIds.at(-1), 'dispatch')));
 
-  const acked = await adapter.checkRun({ runId: req(ctx.runId, 'runId'), ackDeliveryId: req(waited.raw.deliveryId, 'deliveryId') });
-  assert.equal(acked.raw.acknowledged, waited.raw.deliveryId);
-  assert.equal(acked.raw.count, 0, 'ack 后协调者收件箱应无待处理批');
+  // 双形态：旧回执带 deliveryId（批需下次 --ack 显式确认）；新回执（桌面 11-10 起）
+  // 返回即标记已处理，不再携带 deliveryId/count。仅在旧形态下验证 ack 路径。
+  if (waited.raw.deliveryId !== null && waited.raw.deliveryId !== undefined) {
+    const acked = await adapter.checkRun({ runId: req(ctx.runId, 'runId'), ackDeliveryId: waited.raw.deliveryId });
+    assert.equal(acked.raw.acknowledged, waited.raw.deliveryId);
+    assert.equal(acked.raw.count, 0, 'ack 后协调者收件箱应无待处理批');
+  }
 });
 
 test('worker-show：结算状态可见', async () => {

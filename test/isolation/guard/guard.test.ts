@@ -186,6 +186,22 @@ function stdoutJson(result: ExecResult): Record<string, unknown> {
   return JSON.parse(result.stdout) as Record<string, unknown>;
 }
 
+/**
+ * 双形态断言（桌面 11-10 更新漂移）：旧 check 回执带 runId，可核对 check 命中的
+ * 就是夹具终端绑定的 Run；新回执不再返回 runId，只能断言经 guard 的 check 成功
+ * 返回邮箱（ok:true + messages 数组）——绑定事实已由夹具 run-current 轮询确立，
+ * 且伪造终端/env 命中无效终端时会得到 ok:false 而非本形态。
+ */
+function assertGuardCheckMailbox(body: Record<string, unknown>, note: string): void {
+  assert.equal(body.ok, true, `${note}: check 应 ok`);
+  const result = body.result as { runId?: string; messages?: unknown[] };
+  if (result.runId !== undefined) {
+    assert.equal(result.runId, fx().runId, `${note}: check 应返回夹具终端绑定的 Run 邮箱`);
+  } else {
+    assert.ok(Array.isArray(result.messages), `${note}: check 应返回邮箱 messages 数组`);
+  }
+}
+
 before(async () => {
   // 失败时收尾已建资源（server/终端/容器），让错误信息可见且进程可退出。
   let createdTerminal: string | null = null;
@@ -222,9 +238,13 @@ before(async () => {
   let runId = '';
   for (let i = 0; i < 20; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
-    const check = await run(orcaBin, ['orchestration', 'check', '--terminal', terminalHandle, '--json']);
+    // 双形态轮询：旧 runtime 用 check --terminal 的 runId 观察绑定；桌面 11-10 更新后
+    // check 不再返回 runId，改用 run-current --from（未绑定为 null，绑定为 run_* 字符串）。
+    const probe =
+      await run(orcaBin, ['orchestration', 'run-current', '--from', terminalHandle, '--json']);
     try {
-      runId = String(parseOkJson(check.stdout, 'fixture check')['runId'] ?? '');
+      const probed = parseOkJson(probe.stdout, 'fixture run-current')['runId'];
+      runId = typeof probed === 'string' ? probed : '';
     } catch {
       runId = '';
     }
@@ -412,18 +432,13 @@ describe('T5.1 guard 隔离（真实容器 + 真实 gov + 真实 runtime）', ()
   test('正向链：guard orca check 返回夹具 Run 邮箱（T0.3 复现）', async () => {
     const result = await guard(['orca', 'check']);
     assert.equal(result.code, 0, `guard orca check 失败: ${result.stderr.slice(0, 400)}\n${result.stdout.slice(0, 400)}`);
-    const body = stdoutJson(result);
-    assert.equal(body.ok, true);
-    const checkResult = body.result as { runId?: string; dispatchId?: string | null; messages?: unknown[] };
-    assert.equal(checkResult.runId, fx().runId, 'check 应返回夹具终端绑定的 Run 邮箱');
-    assert.ok(Array.isArray(checkResult.messages), 'mailbox messages 应为数组');
+    assertGuardCheckMailbox(stdoutJson(result), '正向链');
   });
 
   test('垫片入口：/usr/local/bin/orca（preamble 裸命令名）仍经 guard', async () => {
     const result = await taskSh('PATH=/usr/local/bin:/usr/bin:/bin orca check');
     assert.equal(result.code, 0, `垫片路径失败: ${result.stderr.slice(0, 400)}`);
-    const body = stdoutJson(result);
-    assert.equal((body.result as { runId?: string }).runId, fx().runId);
+    assertGuardCheckMailbox(stdoutJson(result), '垫片入口');
   });
 
   test('任务用户直接执行真 CLI 被拒（broker 0700 目录）', async () => {
@@ -451,7 +466,7 @@ describe('T5.1 guard 隔离（真实容器 + 真实 gov + 真实 runtime）', ()
     const identityLeak = await taskSh('PATH=$HOME/shim:$PATH orca check 2>&1 >/dev/null | grep -c govt_ || true');
     assert.equal(identityLeak.stdout.trim(), '0', '假垫片读不到身份令牌（govt_ 零泄漏）');
     assert.equal(result.code, 0, `转发真垫片后应成功: ${result.stderr.slice(0, 400)}`);
-    assert.equal((stdoutJson(result).result as { runId?: string }).runId, fx().runId);
+    assertGuardCheckMailbox(stdoutJson(result), 'PATH 垫片替换');
   });
 
   test('环境变量伪造（ORCA_*/GOV_*）不影响身份与传输', async () => {
@@ -467,8 +482,7 @@ describe('T5.1 guard 隔离（真实容器 + 真实 gov + 真实 runtime）', ()
       ],
     );
     assert.equal(result.code, 0, `guard 应忽略伪造 env: ${result.stderr.slice(0, 400)}`);
-    const body = stdoutJson(result);
-    assert.equal((body.result as { runId?: string }).runId, fx().runId, '伪造终端/env 不得改变 resolvedTerminal');
+    assertGuardCheckMailbox(stdoutJson(result), '环境变量伪造');
   });
 
   test('恶意仓库配置不被读取（cwd 隔离）', async () => {
@@ -476,7 +490,7 @@ describe('T5.1 guard 隔离（真实容器 + 真实 gov + 真实 runtime）', ()
     assert.match(visible.stdout, /not: valid: yaml/, '恶意 orca.yaml 应在 /work 可见（读取断言的区分度前提）');
     const result = await guard(['orca', 'check']);
     assert.equal(result.code, 0, `cwd 隔离下 guard 应不受 /work 恶意配置影响: ${result.stderr.slice(0, 300)}`);
-    assert.equal((stdoutJson(result).result as { runId?: string }).runId, fx().runId);
+    assertGuardCheckMailbox(stdoutJson(result), '恶意仓库配置');
   });
 
   test('任务目录植入同名 node 模块不被加载', async () => {
@@ -498,8 +512,7 @@ describe('T5.1 guard 隔离（真实容器 + 真实 gov + 真实 runtime）', ()
   test('伪造注入指令字段（--from/--terminal/--task-id）不改 resolvedTerminal', async () => {
     const result = await guard(['orca', 'check', '--terminal', 'term_evil', '--from', 'term_evil']);
     assert.equal(result.code, 0, `调用者身份标志应被剥除: ${result.stderr.slice(0, 300)}`);
-    const body = stdoutJson(result);
-    assert.equal((body.result as { runId?: string }).runId, fx().runId, '解析终端必须是 gov 回执值');
+    assertGuardCheckMailbox(stdoutJson(result), '伪造注入指令字段');
   });
 
   test('允许的 gov 动作（status）通过并回真 JSON', async () => {
