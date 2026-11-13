@@ -25,6 +25,7 @@ import { applyTaskTransition } from '../state/task-machine.ts';
 import { withTransaction } from '../db/database.ts';
 import { beginOperation, canonicalRequestHash, finalizeOperation } from '../operations.ts';
 import { issueToken } from '../auth.ts';
+import { PROMPT_SET_HASH_EVENT_TYPE, PROMPT_SET_VERSION, promptSetHash } from '../prompts/prompt-set.ts';
 import type { WorkerStartReceipt } from '../adapters/orca.ts';
 import {
   isTrustGateFailure,
@@ -491,6 +492,14 @@ export function createClaimService(deps: ClaimServiceDeps): ClaimService {
         input.taskId,
       );
       return token;
+    });
+
+    // T5.3 装配点：认领成功即冻结该认领使用的角色提示词集指纹（事件为审计真源）。
+    recordTaskEvent(db, input.taskId, PROMPT_SET_HASH_EVENT_TYPE, coordinatorSession, {
+      claimId,
+      role: 'executor',
+      promptSetVersion: PROMPT_SET_VERSION,
+      promptSetHash: promptSetHash(),
     });
 
     return {
