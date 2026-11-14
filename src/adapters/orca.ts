@@ -8,12 +8,15 @@
  * 回执契约：每个动词返回 { ok: true, raw, …字段 }；失败抛 OrcaAdapterError，
  * detail 携带 failedStage / residualResources（存在时）与 exitCode，stdout/stderr
  * 原文截断到 4 KiB（适配器不向 CLI 传递任何环境变量或凭据，原文本身不含敏感值）。
- * worker-start 的失败/不确定结局是「回执」而非异常：CLI 以 ok:true + state:failed
- * 返回 failedStage 与 residualResources，由调用方按回执处置。
- * 注意（2026-11-14 实测）：桌面 11-10 更新（1.4.255）已不再遵守该形态——运行期失败
- * 改为 ok:false + result 载荷（无 error 对象，exit 1），本适配器按信封规则抛
- * E_ORCA_CALL_FAILED；是否恢复「失败即回执」契约属未裁决的语义分叉，见
- * execution/adapter-drift-fix-report.md。
+ * worker-start 的失败/不确定结局是「回执」而非异常。桌面 11-10 更新（1.4.255）起
+ * 运行期失败不再以 ok:true 回执返回，而是 ok:false + result 载荷（无 error 对象，
+ * exit 1，residualResources 变字符串数组）；适配器对该形态自动经 worker-show 读回
+ * 该 dispatch，重建旧契约等价回执（failedStage 从读回的扁平 state/stage/lastError
+ * 映射，residualResources 字符串还原为 {kind,id,role:'unknown'} 对象），调用方
+ * （claims.ts）契约零改动。参数校验/前置拒绝（ok:false + error 信封，如
+ * invalid_argument、task_not_startable）不走读回、仍抛 E_ORCA_CALL_FAILED；读回
+ * 本身失败同样抛 E_ORCA_CALL_FAILED 并携带失败载荷的 lastError 原文。
+ * 见 execution/worker-start-readback-fix-report.md。
  */
 import { execFile } from 'node:child_process';
 import { realpathSync } from 'node:fs';
@@ -130,6 +133,40 @@ export class OrcaAdapterError extends GovError {
   }
 }
 
+/** ok:false 错误信封 → E_ORCA_CALL_FAILED（verb 前缀 + 截断原文 + 上游错误码）。 */
+function notOkOrcaError(
+  args: readonly string[],
+  envelope: z.infer<typeof envelopeSchema>,
+  exitCode: number | string | undefined,
+  stdout: string,
+): OrcaAdapterError {
+  const orcaError = envelope.error;
+  const detail: { verb: string; output: string; exitCode?: number | string; orcaErrorCode?: string } = {
+    verb: args.slice(0, 2).join(' '),
+    output: truncateToDetailLimit(stdout),
+  };
+  if (exitCode !== undefined) {
+    detail.exitCode = exitCode;
+  }
+  if (orcaError?.code !== undefined) {
+    detail.orcaErrorCode = orcaError.code;
+  }
+  return new OrcaAdapterError(
+    'E_ORCA_CALL_FAILED',
+    `Orca 报错 (${args.join(' ')}): ${orcaError?.code ?? 'unknown'} ${orcaError?.message ?? ''}`.trim(),
+    detail,
+  );
+}
+
+/** 1.4.255 失败载荷的残差资源字符串（"worktree <sel>" / "terminal <handle>"）→ 对象形态；role 在该形态下不可知，记 'unknown'。 */
+function parseResidualResourceString(item: string): { kind: string; id?: string; role: string } {
+  const sep = item.indexOf(' ');
+  if (sep < 0) {
+    return { kind: item, role: 'unknown' };
+  }
+  return { kind: item.slice(0, sep), id: item.slice(sep + 1), role: 'unknown' };
+}
+
 // ---------------------------------------------------------------------------
 // JSON 结构校验：每个动词只对「消费的字段」建 schema，passthrough 容忍
 // Orca 新增字段；必填字段缺失或类型不符 → E_ORCA_SCHEMA 并保留原文引用。
@@ -244,6 +281,22 @@ const workerStartResultSchema = z
     effects: z.array(resourceEffectSchema).optional(),
     residualResources: z.array(resourceEffectSchema).optional(),
     recovery: z.string().optional(),
+  })
+  .passthrough();
+
+// worker-start 运行期失败载荷（1.4.255 实测）：ok:false + result 且无 error 对象。
+// 识别门只钉住读回重建所必需的身份字段；failedStage/lastError/residualResources
+// 可缺省（由 worker-show 读回补齐，residualResources 在该形态下是字符串数组，
+// 重建时还原为 {kind,id,role:'unknown'} 对象形态）。
+const workerStartRuntimeFailureSchema = z
+  .object({
+    dispatchId: nonEmpty,
+    taskId: nonEmpty,
+    runId: nonEmpty,
+    state: nonEmpty,
+    failedStage: z.string().optional(),
+    lastError: z.string().optional(),
+    residualResources: z.array(z.string()).optional(),
   })
   .passthrough();
 
@@ -462,6 +515,8 @@ export interface OrcaAdapterOptions {
 
 interface ExecOptions {
   readonly timeoutMs?: number;
+  /** worker-start 专用：ok:false 信封不在此抛，交由调用方区分「错误信封直抛」与「运行期失败载荷读回重建」。 */
+  readonly keepNotOkEnvelope?: boolean;
 }
 
 export function createOrcaAdapter(options: OrcaAdapterOptions = {}) {
@@ -471,7 +526,10 @@ export function createOrcaAdapter(options: OrcaAdapterOptions = {}) {
   let runtimeVerified = false;
 
   /** 派生 Orca CLI 进程的唯一出口；白名单门卫在派生前执行。 */
-  async function runOrca(args: readonly string[], exec: ExecOptions = {}): Promise<{ envelope: z.infer<typeof envelopeSchema>; stdout: string }> {
+  async function runOrca(
+    args: readonly string[],
+    exec: ExecOptions = {},
+  ): Promise<{ envelope: z.infer<typeof envelopeSchema>; stdout: string; exitCode: number | string | undefined }> {
     assertOrcaVerbAllowed(args);
     let stdout = '';
     let stderr = '';
@@ -523,24 +581,12 @@ export function createOrcaAdapter(options: OrcaAdapterOptions = {}) {
       });
     }
     if (parsed.data.ok !== true) {
-      const orcaError = parsed.data.error;
-      const detail: { verb: string; output: string; exitCode?: number | string; orcaErrorCode?: string } = {
-        verb: args.slice(0, 2).join(' '),
-        output: truncateToDetailLimit(stdout),
-      };
-      if (exitCode !== undefined) {
-        detail.exitCode = exitCode;
+      if (exec.keepNotOkEnvelope === true) {
+        return { envelope: parsed.data, stdout, exitCode };
       }
-      if (orcaError?.code !== undefined) {
-        detail.orcaErrorCode = orcaError.code;
-      }
-      throw new OrcaAdapterError(
-        'E_ORCA_CALL_FAILED',
-        `Orca 报错 (${args.join(' ')}): ${orcaError?.code ?? 'unknown'} ${orcaError?.message ?? ''}`.trim(),
-        detail,
-      );
+      throw notOkOrcaError(args, parsed.data, exitCode, stdout);
     }
-    return { envelope: parsed.data, stdout };
+    return { envelope: parsed.data, stdout, exitCode };
   }
 
   /** 按动词 schema 校验 result；失败保留原文引用。 */
@@ -601,6 +647,53 @@ export function createOrcaAdapter(options: OrcaAdapterOptions = {}) {
     const { envelope, stdout } = await runOrca(args, exec);
     const raw = validateResult(schema, envelope.result, verb, stdout);
     return { ok: true, raw };
+  }
+
+  /**
+   * 1.4.255 运行期失败的读回重建（控制器裁定路线，adapter-drift-fix §6-A）：
+   * worker-show 读回该 dispatch 的台账事实——state/stage/lastError 以读回为权威
+   * （失败载荷缺 failedStage 时即由此映射），叠加失败载荷的 residualResources
+   * （字符串还原为 {kind,id,role:'unknown'}），重建旧契约回执并按原 schema 校验。
+   * 读回失败 → E_ORCA_CALL_FAILED 且 message 携带失败载荷的 lastError 原文：
+   * 运行期失败原因不能被读回错误吞掉，调用方仍可据此分类转人工。
+   */
+  async function rebuildRuntimeFailureReceipt(
+    failure: z.infer<typeof workerStartRuntimeFailureSchema>,
+    failureStdout: string,
+  ): Promise<WorkerStartReceipt> {
+    let shown: { ok: true; raw: WorkerShowReceipt };
+    try {
+      shown = await callJson(
+        ['orchestration', 'worker-show', '--dispatch', failure.dispatchId, '--json'],
+        workerShowResultSchema,
+        'worker-show',
+      );
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new OrcaAdapterError(
+        'E_ORCA_CALL_FAILED',
+        `worker-start 运行期失败且读回失败: ${failure.lastError ?? `state=${failure.state}`}; worker-show: ${reason}`,
+        {
+          verb: 'worker-start',
+          exitCode: 1,
+          ...(failure.failedStage !== undefined ? { failedStage: failure.failedStage } : {}),
+          output: truncateToDetailLimit(failureStdout),
+        },
+      );
+    }
+    const worker = shown.raw.worker;
+    const raw = {
+      ...failure,
+      dispatchId: worker.dispatchId,
+      taskId: shown.raw.dispatch.taskId,
+      state: worker.state,
+      ...(worker.stage !== undefined ? { failedStage: worker.stage } : {}),
+      ...(worker.lastError !== undefined ? { lastError: worker.lastError } : {}),
+      ...(failure.residualResources !== undefined
+        ? { residualResources: failure.residualResources.map(parseResidualResourceString) }
+        : {}),
+    };
+    return validateResult(workerStartResultSchema, raw, 'worker-start', failureStdout);
   }
 
   return {
@@ -668,8 +761,11 @@ export function createOrcaAdapter(options: OrcaAdapterOptions = {}) {
     /**
      * worker-start：新工作树必须给 --name 与精确 --repo（CLI 强制）；重试必须同时
      * 给 --task 与 --retry-of。失败/不确定结局以回执返回（state=failed + failedStage
-     * + residualResources + recovery），不抛异常；ok:false（如 task_not_startable、
-     * terminal_worktree_mismatch）才抛 E_ORCA_CALL_FAILED。
+     * + residualResources + recovery），不抛异常；1.4.255 起运行期失败以 ok:false +
+     * result 载荷（无 error 对象）到达，此处经 worker-show 读回重建等价回执（见
+     * rebuildRuntimeFailureReceipt）。ok:false + error 信封（invalid_argument、
+     * task_not_startable、terminal_worktree_mismatch 等参数/前置拒绝）不走读回，
+     * 直接抛 E_ORCA_CALL_FAILED。
      */
     async workerStart(input: {
       readonly task: string;
@@ -702,9 +798,20 @@ export function createOrcaAdapter(options: OrcaAdapterOptions = {}) {
         args.push('--name', input.name);
       }
       args.push('--json');
-      const receipt = await callJson(args, workerStartResultSchema, 'worker-start');
-      const terminalEffect = receipt.raw.effects?.find((e) => e.kind === 'terminal' && e.role === 'agent' && typeof e.id === 'string');
-      const raw: WorkerStartReceipt = { ...receipt.raw };
+      await ensureRuntimeReady();
+      const { envelope, stdout, exitCode } = await runOrca(args, { keepNotOkEnvelope: true });
+      if (envelope.ok !== true) {
+        // 1.4.255 运行期失败（ok:false + result 载荷且无 error 对象）→ 读回重建回执；
+        // error 信封（参数校验/前置拒绝）维持直抛，不进读回。
+        const failure =
+          envelope.error === undefined ? workerStartRuntimeFailureSchema.safeParse(envelope.result) : undefined;
+        if (failure !== undefined && failure.success) {
+          return { ok: true, raw: await rebuildRuntimeFailureReceipt(failure.data, stdout) };
+        }
+        throw notOkOrcaError(args, envelope, exitCode, stdout);
+      }
+      const raw: WorkerStartReceipt = validateResult(workerStartResultSchema, envelope.result, 'worker-start', stdout);
+      const terminalEffect = raw.effects?.find((e) => e.kind === 'terminal' && e.role === 'agent' && typeof e.id === 'string');
       if (terminalEffect?.id !== undefined) {
         raw.terminalHandle = terminalEffect.id;
       }
