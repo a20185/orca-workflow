@@ -1,0 +1,320 @@
+# 工作流类型实施计划
+
+> 版本：v1  
+> 日期：2026-11-14  
+> 实施目录：`/Users/souler/Documents/daqian/playground/orca-dev-workflow`  
+> 基线提交：`8410731`  
+> 文档性质：只规定文件边界、输入、输出、接受规则和验证门，不包含实现代码
+
+## 1. 目标
+
+在保留现有 `gov` 治理内核的前提下，完成剩余工程任务，并增加三种交付类型：
+
+1. **探索型研究**：以报告、适配分析或 ADR 为交付物，不要求对照实验，也不要求代码合并。
+2. **对照实验**：以假设、基线、变量矩阵、运行回执、指标和采用决定为交付物，不自动合并实验产物。
+3. **工程交付**：以任务书、ADR、实施计划、代码差异、测试与评审回执为交付物，按风险选择单次终审或规格与实现双闸门后合并。
+
+三类任务共用认领、环境隔离、身份、证据、操作恢复和资源清理。任务书、状态迁移、验收证据和角色材料按交付类型分别定义，不新建第二套 Agent 系统。
+
+## 2. 基线与约束
+
+### 2.1 已核实基线
+
+- 当前实现已完成 Phase 0–5 的主要工程任务；T6.1–T7.2 尚未完成。
+- `src/domain/task-spec.ts` 是严格 `schemaVersion: 1` 的工程任务书，要求 `baseCommitId`、目标和三类验收标准。
+- `src/prompts/prompt-set.ts` 当前要求恰好四份角色模板，并计算 `promptSetHash`。
+- 最近一次串行执行结果：`test:isolation` 32/32 通过；`test/integration` 在 `test/integration/recovery/recovery.test.ts:646` 失败，错误码为 `E_CLAIM_PREP_FAILED`。确切 `lastError` 和失败阶段必须先核实，不能预设为模型问题。
+- Orca 适配器已对近期回执漂移做过兼容修复，但桌面运行时版本仍可能影响真实 worker 启动。
+- 桌面 `claude Command` 与 settings 路径问题已由用户修正；最新探针 `run_fc20a8144bf5` 返回 `state=ready`，随后收到 `worker_done`。该探针只证明当前 worker 启动链路可用，不能替代 S3 失败根因诊断。
+
+### 2.2 会话证据的使用边界
+
+输入证据来自仓库内的 `docs/research/session-workflow-evidence.md` 与 `docs/research/model-routing-doctrine.md`：
+
+- 近期样本支持探索型研究与对照实验使用不同验收标准。
+- 方案评审和实现评审可以分开，但低风险交付允许一次终审。
+- 实验终点是证据包与采用决定，不是自动合并。
+- 实际使用以主会话加一层子代理为主，不能据此强制三级 Session。
+- `subagent-dev-simple + Opus 终审 + codex impl-mode 终审` 是已观察到的交付路径；deepseek、KIMI、GLM 的固定分工尚未证实，只能作为试点候选。
+
+OpenCode 数据截至 2026-09-17，不能据此判断其后两个月的模型偏好。实验调优曾出现高消息数和高成本，必须设置停止条件。
+
+### 2.3 硬约束
+
+1. 先修复基线测试，再增加工作流类型；不得把环境修复和模型路由修改放在同一变量实验中。
+2. 不把任何模型通道写成已验证最优或默认必选。
+3. 不为研究或实验强制 `baseCommitId`、bookmark、快进合并或部署。
+4. 不把职责角色数量等同于 Session 层数；默认主会话加一层执行或评审 Session，复杂任务才增加独立任务负责人。
+5. 不自动 push、创建 MR、部署或修改 GitLab Issue。
+6. 不修改 `~/.cenv/` 中的凭据文件，不在日志中记录其内容。
+7. 视觉、设备和跨系统结果仍需人工验收，不能由测试或日志自动替代。
+8. 不改变现有 v1 工程任务书的读取行为；新版本必须说明迁移和消费者分支行为。
+
+## 3. 目标结构
+
+```mermaid
+flowchart TD
+    A[P0 基线修复与剩余工程任务] --> B[TaskSpec v2 与共享证据]
+    B --> C[探索型研究流程]
+    B --> D[对照实验流程]
+    B --> E[工程风险分级评审]
+    C --> F[研究试点]
+    D --> G[对照实验试点]
+    E --> H[工程试点]
+    F --> I[统一指标评估与最终复核]
+    G --> I
+    H --> I
+```
+
+最终形成以下模块边界：
+
+| 模块 | 责任 |
+|---|---|
+| 任务书与配置 | 识别交付类型、复杂度、阶段通道和预算 |
+| 状态与证据 | 按类型限制状态迁移、记录来源/运行/指标/决策证据 |
+| 研究服务 | 生成来源清单、报告或 ADR，并允许在报告后结束 |
+| 实验服务 | 锁定实验设计，保存运行回执和独立评测结果 |
+| 工程评审 | 按风险决定单次终审或规格与实现双闸门 |
+| 模型通道 | 通过绝对路径的 settings 文件选择执行通道，不进入提示词正文 |
+| 评估与发布 | 比较成功率、返修、成本、时延和证据完整性，形成采用或暂缓决定 |
+
+## 4. 决策记录
+
+| 编号 | 决策 | 理由 |
+|---|---|---|
+| D1 | 按交付物而不是按“研究/工程”名称分类 | 工程任务也包含调研，实验也可能产生代码 |
+| D2 | 保留一个治理内核，按类型扩展任务书和状态机 | 避免重复建设认领、隔离、恢复和清理 |
+| D3 | 研究分探索型和对照实验型 | 报告退出条件与实验指标退出条件不同 |
+| D4 | 实验不自动合并，采用后另建工程任务 | 防止研究证据直接变成未审查的工程变更 |
+| D5 | 默认两层 Session，复杂任务才增加任务负责人 | 近期样本主要是主会话加一层子代理 |
+| D6 | 评审按风险分级 | 高风险需要规格与实现双闸门，低风险可一次终审 |
+| D7 | 模型路由先做三项试点 | 现有证据不足以证明固定分工 |
+| D8 | 先完成 T6.1–T7.2 和当前失败修复 | 防止将环境变量误读为架构或模型问题 |
+
+## 5. 执行波次与文件所有权
+
+真实模型试点全部串行执行，避免供应商配额、桌面 Runtime 和容器资源互相影响。只有明确标记为可并行的文档或单元测试任务才可并行。
+
+| 波次 | 任务 | 可并行 | 退出条件 |
+|---|---|---|---|
+| W0 | P0.1 | 否 | 当前失败原因有证据，集成与隔离全部通过 |
+| W1 | P0.2、P0.3 | 是 | T6.1 一致性、T6.2 预算与通知通过 |
+| W2 | P0.4 | 否 | 真实 Agent 试点和 runbook 完成 |
+| W3 | P0.5、P0.6 | 否 | Nix 创建、共存与清理通过 |
+| W4 | P1.1 | 否 | v2 任务书、迁移、错误码通过 |
+| W5 | P1.2 | 否 | 状态与证据模型通过 |
+| W6 | P1.3 | 否 | 角色材料、通道注入与哈希通过 |
+| W7 | P2.1、P2.2 | 仅实现文件可并行，真实调用串行 | 研究和实验服务通过各自验证 |
+| W8 | P2.3 | 否 | 工程风险分级评审通过 |
+| W9 | P3.1 | 否 | 探索型研究试点完成 |
+| W10 | P3.2 | 否 | 对照实验试点完成 |
+| W11 | P3.3 | 否 | 工程试点及合并清理完成 |
+| W12 | P3.4 | 否 | 指标评估与路由决定完成 |
+| W13 | P3.5 | 否 | 文档、技能和最终复核完成 |
+
+### 文件所有权矩阵
+
+| 任务 | 唯一写入范围 |
+|---|---|
+| P0.1 | `src/adapters/orca.ts`、`src/services/claims.ts`、`test/integration/recovery/` |
+| P0.2 | `test/conformance/`、`package.json` 中的一致性测试脚本 |
+| P0.3 | `src/services/budgets.ts`、`src/services/status.ts`、`test/unit/budgets/` |
+| P0.4 | `docs/pilot/`、`runbook.md`、`/Users/souler/yfp/.claude/skills/orca-coord/SKILL.md` |
+| P0.5 | `deploy/nix/` |
+| P0.6 | `test/isolation/nix/` |
+| P1.1 | `src/domain/task-spec.ts`、`src/domain/workflow-spec.ts`、`src/domain/errors.ts`、`src/db/migrations.ts`、`test/unit/domain/` |
+| P1.2 | `src/state/workflow-profiles.ts`、`src/services/workflow-state.ts`、`src/services/ports.ts`、`src/domain/evidence.ts`、`test/unit/state/` |
+| P1.3 | `src/prompts/prompt-set.ts`、`prompts/`、`src/services/model-channels.ts`、`src/config.ts`、`test/unit/prompts/`、`test/unit/model-channels/`、`deploy/README.md` |
+| P2.1 | `src/services/research.ts`、`src/services/research-evidence.ts`、`test/unit/research/`、`test/integration/research/` |
+| P2.2 | `src/services/experiments.ts`、`src/services/judge.ts`、`test/unit/experiments/`、`test/integration/experiments/` |
+| P2.3 | `src/services/review-gates.ts`、`src/services/reviews.ts`、`src/services/merges.ts`、`test/unit/review-gates/` |
+| P3.1 | `docs/pilots/research/` |
+| P3.2 | `docs/pilots/experiment/` |
+| P3.3 | `docs/pilots/engineering/` |
+| P3.4 | `docs/evaluation/`、`src/services/metrics.ts`、`test/unit/metrics/` |
+| P3.5 | `governance-design.md`、`governance-tasks.md`、`workflow-profiles-plan.md`、`docs/research/session-workflow-analysis.md`、`execution/review-package.md` |
+
+`execution/` 只保存执行过程记录，已由忽略规则排除，不作为实现任务的交付源码。任何新错误码统一归 P1.1，其他任务不得新增错误码文件或改写既有错误码语义。
+
+## 6. Phase 0：基线修复与剩余工程任务
+
+### P0.1 核实并修复当前集成测试失败
+
+- **Files**：修改 `src/adapters/orca.ts`、`src/services/claims.ts`、`test/integration/recovery/`；不得修改业务任务书或模型路由。
+- **Inputs**：`recovery.test.ts:630–670` 的 S3 场景、真实 `worker-start` 回执、当前 Orca runtime 版本、`execution/worker-start-readback-fix-report.md`，以及最新 `run_fc20a8144bf5` 的 ready/worker_done 探针记录。
+- **Outputs**：失败阶段的实际错误原文、根因分类、最小修复和 S3 回归证据。
+- **Accept rule**：区分回执形状变化、工作区配置、信任门和真实行为变化；只修复有证据支持的缺陷；不得用跳过测试或放宽断言掩盖失败。若根因不在本任务文件所有权内，先停下并调整计划，不跨文件修补。
+- **Verification gate**：`pnpm check`、`pnpm test:integration`、`pnpm test:isolation` 串行全部通过；S3 的 UNCERTAIN、结算、FENCED 和 retry-of 语义保持不变。
+
+### P0.2 完成 T6.1 全量一致性测试
+
+- **Files**：创建 `test/conformance/`，并在 `package.json` 注册一致性测试命令。
+- **Inputs**：设计 §7、§8、§14；T3.1–T5.3 实现；P0.1 修复结果。
+- **Outputs**：状态、身份、证据、版本、恢复、隔离和清理的可重复场景集、两轮结果文件和资源基准记录。
+- **Accept rule**：所有场景默认执行，无跳过、无首个失败即停止；每个场景独立 rail；失败报告包含任务、操作、外部 ID 和残余资源。
+- **Verification gate**：连续两次完整执行结果一致；Orca、jj、Docker、临时目录和数据库记录回到基准；发现的缺陷返回原文件所有者，不在本任务中扩展功能。
+
+### P0.3 完成 T6.2 预算、状态摘要和事件通知
+
+- **Files**：创建 `src/services/budgets.ts`、`src/services/status.ts`、`test/unit/budgets/`。
+- **Inputs**：设计 §11.2、T1.2 事件记录、T5.3 角色配置。
+- **Outputs**：活动任务与评审并发限制、状态摘要、阻塞原因、下一步和状态变化通知。
+- **Accept rule**：达到预算时等待，不自动换模型；普通进度不通知人；异常包含可执行下一步；构建并发与供应商准入仍按已裁定的延后项处理。
+- **Verification gate**：验证两个任务和一个评审上限；模拟供应商 429、消息重复和通知失败，均不改变治理状态。
+
+### P0.4 完成 T6.3 真实 Agent 试点与工作流更新
+
+- **Files**：创建 `docs/pilot/`；修改 `runbook.md` 和 `/Users/souler/yfp/.claude/skills/orca-coord/SKILL.md`。
+- **Inputs**：G0–G10 通过证据、一个纯逻辑真实任务、真实 Orca/jj/Docker、OpenCode 开发与 Claude 或 Codex 评审。
+- **Outputs**：试点任务书、真实回执、模型与版本、耗时、评审轮数、异常、资源清理记录和最终 runbook。
+- **Accept rule**：完成直接通过、评审退回后继续、目标移动后重新验收、父子任务和两个并行任务；不使用手工 `task-update`、通用 CLI 或自动 push。
+- **Verification gate**：全部结果来自真实 Orca/jj/Docker；runbook 与实际步骤一致；Orca 注册、终端、容器和临时目录清理完成。
+
+### P0.5 完成 T7.1 Nix 环境接入
+
+- **Files**：创建 `deploy/nix/` 及其中环境说明。
+- **Inputs**：P0.4 通过的容器环境、Nix 官方 `nix develop` 与 gc root 文档。
+- **Outputs**：锁定 flake、create 初始化、任务独立 gc root 和 destroy 清理记录。
+- **Accept rule**：Nix 不承担文件权限或资源限制；不执行全局 profile 删除或全局垃圾回收；环境不可用时失败关闭。
+- **Verification gate**：全新环境按锁文件启动；同一输入两次工具版本一致；gc root 与任务 ID 一一对应。
+
+### P0.6 完成 T7.2 Nix 双任务验证
+
+- **Files**：创建 `test/isolation/nix/`。
+- **Inputs**：P0.5 环境和两个不同任务。
+- **Outputs**：共存、缓存、资源限制和单任务删除证据。
+- **Accept rule**：删除一个任务只清理其可写环境和 root，不影响另一个任务的工具与依赖。
+- **Verification gate**：两个任务同时运行测试，清理其中一个后另一个继续通过；不存在全局 `nix-collect-garbage -d` 调用。
+
+## 7. Phase 1：任务书、状态与通道
+
+### P1.1 实现 TaskSpec v2 与迁移
+
+- **Files**：修改 `src/domain/task-spec.ts`；创建 `src/domain/workflow-spec.ts`；追加 `src/db/migrations.ts`；修改 `src/domain/errors.ts` 和 `test/unit/domain/`。
+- **Inputs**：现有 v1 schema、设计 §6、会话证据中的三类交付物。
+- **Outputs**：`workType`（`research`/`experiment`/`engineering`）、`complexity`（`simple`/`medium`/`complex`）、`stageChannels`、三类 profile-specific spec、v1→v2 迁移和读取分支；`agentPolicy` 继续表示 harness 选择，与 `stageChannels` 的模型 settings 注入分离。
+- **Accept rule**：v1 输入继续按工程语义处理；v2 必填字段按类型校验；研究和实验不要求 `baseCommitId` 或 bookmark；`stageChannels` 只引用已配置通道，不携带凭据；模型默认值不得新增。`agentPolicy` 在 v2 中保留为 harness 选择，v1 的 literal/enum 语义不变，`claims.ts` 的 `workerStart.agent` 来源对 v1/v2 一致，模型只通过 settings 注入切换。
+- **Verification gate**：旧任务解析不变；未知字段、错误类型、缺失基线（对照实验）、缺失来源范围（研究）均拒绝；迁移幂等且可回滚。
+
+### P1.2 实现按类型分状态机与证据记录
+
+- **Files**：创建 `src/state/workflow-profiles.ts`、`src/services/workflow-state.ts`、`src/domain/evidence.ts`；修改 `src/services/ports.ts` 和 `test/unit/state/`。
+- **Inputs**：设计 §7、§13；P1.1 profile 类型；现有任务/认领/操作记录。
+- **Outputs**：研究状态 `collecting/analyzing/decision_review/done/parked`、实验状态 `design_review/running/benchmarking/report_review/decided/parked`、证据类型 `source/run-receipt/metric/decision`、操作员豁免记录。
+- **Accept rule**：非法迁移拒绝；研究到工程必须新建工程任务；实验禁止直接 merge；`NOT_READY` 未记录操作员豁免不得继续；外部结果不确定时不自动重试。
+- **Verification gate**：覆盖全部合法边、终态无出边、豁免留痕、证据不可改写、重复恢复不产生重复副作用。
+
+### P1.3 实现角色材料 v2 与模型通道注入
+
+- **Files**：修改 `src/prompts/prompt-set.ts`、`src/config.ts`；创建 `prompts/` 下按类型和复杂度划分的材料、`src/services/model-channels.ts`、`test/unit/prompts/`、`test/unit/model-channels/`；修改 `deploy/README.md`。
+- **Inputs**：设计 §12、现有四模板装配、模型路由候选、`~/.cenv/` 文件名（不读取内容）。
+- **Outputs**：独立的 v2 材料版本标识与 manifest/hash、`prompts/v2/<profile>/<role>-<complexity>.md` 材料、绝对路径 settings 注入和通道回执；v1 根目录四份模板及其 `promptSetHash` 行为不变。
+- **Accept rule**：模板不包含模型名、令牌或管理命令教程；hash 只用于材料完整性；注入路径不得使用 `~`；不同角色可使用不同 Session 或新上下文；hook 失效不改变容器权限；v1 根目录四份模板及其解析/哈希行为保持可用，v2 材料必须位于 `prompts/v2/<profile>/` 子目录并使用独立 manifest/hash，未知 profile 失败关闭。
+- **Verification gate**：材料清单与 hash 确定；占位符无残留；通道切换只改变 settings 文件；敏感内容扫描通过；简单/中等/复杂三种模板均能被正确装配。
+
+## 8. Phase 2：三类工作流实现
+
+### P2.1 实现探索型研究流程
+
+- **Files**：创建 `src/services/research.ts`、`src/services/research-evidence.ts`、`test/unit/research/`、`test/integration/research/`。
+- **Inputs**：P1.1 研究任务书、P1.2 状态和证据、P1.3 采集与分析通道。
+- **Outputs**：来源清单、分主题笔记、报告或 ADR、未知项和采用/继续实验/转工程/搁置决定。
+- **Accept rule**：采集只记录来源事实，分析必须能回溯到来源；不以对照实验或代码合并作为必需出口；达到时间或来源预算后必须形成可审阅结果。
+- **Verification gate**：报告可不经过实验直接结束；来源与主张可互查；无来源支持的断言标为未知；不发生自动 push、merge 或部署。
+
+### P2.2 实现对照实验与独立评测流程
+
+- **Files**：创建 `src/services/experiments.ts`、`src/services/judge.ts`、`test/unit/experiments/`、`test/integration/experiments/`。
+- **Inputs**：实验任务书、基线、变量矩阵、固定输入、指标、样本策略、停止规则、执行与评测通道。
+- **Outputs**：锁定实验设计、运行回执、原始输出、评分器结果、分母与失败样本、分析报告和采用决定。
+- **Accept rule**：对照实验必须有基线和预先声明指标；一次只改变一个主要变量；运行中不得修改实验设计；评测与实现分离；实验不自动合并。
+- **Verification gate**：缺基线或指标拒绝启动；原始结果不可改写；分母、缺答、降级和失败样本齐全；独立 judge 输出可复核；达到预算即停止并保留阴性结果。
+
+### P2.3 实现工程风险分级评审与豁免
+
+- **Files**：创建 `src/services/review-gates.ts`；修改 `src/services/reviews.ts`、`src/services/merges.ts`、`test/unit/review-gates/`。
+- **Inputs**：现有工程评审与合并流程、`docs/research/codex-double-gate-evidence.md`、复杂度字段。
+- **Outputs**：简单任务单次终审策略、标准/高风险规格与实现双闸门、操作员豁免记录和部署人工决定点。
+- **Accept rule**：简单任务允许一次终审；标准或高风险必须先规格评审再实现评审；规格 NOT-READY 未豁免不得进入实现；评审不替代测试；合并后仍需人工决定部署。既有 `Opus 终审 + Codex impl-mode` 路径保留为对照，KIMI 总审仅作为试点候选，不写成默认要求。
+- **Verification gate**：单终审路径与双闸门路径分别通过；豁免可审计；未豁免的 NOT-READY 被阻断；没有自动 push 或部署。
+
+## 9. Phase 3：试点与评估
+
+### P3.1 执行探索型研究试点
+
+- **Files**：创建 `docs/pilots/research/`。
+- **Inputs**：一个明确的业界实践调研问题、P2.1 研究流程、GLM 采集通道和 KIMI 分析通道。
+- **Outputs**：来源清单、分析报告、适配度/成本/复杂度比较、是否进入实验或工程的决定。
+- **Accept rule**：试点可在报告后结束，不强制产生代码或实验；所有关键主张能回指来源；记录未解决问题。
+- **Verification gate**：研究产物完整、无自动合并、无自动部署；评审仅检查证据和范围，不将报告文风当作通过条件。
+
+### P3.2 执行对照实验试点
+
+- **Files**：创建 `docs/pilots/experiment/`。
+- **Inputs**：同一批明确规格开发任务、deepseek 与 kimi-for-coding 两个候选通道、固定输入和预算、P2.2 实验流程。
+- **Outputs**：冻结实验设计、两臂运行回执、自动评测结果、成本/时延/一次通过率/返修轮数/越界率对比和独立评审记录。
+- **Accept rule**：同一 case 配对比较，除通道外不改变输入、预算或评分标准；实验设计者与最终评估者分离；不因单次结果指定默认模型。
+- **Verification gate**：两臂均有完整分母和失败清单；独立 judge 可重算；Codex 或指定评审通道完成对抗复核；最终结论标明样本量和不确定性。
+
+### P3.3 执行工程交付试点
+
+- **Files**：创建 `docs/pilots/engineering/`。
+- **Inputs**：一个已知工程变更、KIMI 方案与拆解、deepseek 实现和测试、Codex 实现评审、独立总审（KIMI 为试点候选，实际以评审配置为准）。
+- **Outputs**：ADR、实施计划、实现 diff、测试回执、评审处置、合并回执和清理回执。
+- **Accept rule**：按复杂度选择单终审或双闸门；只有评审通过后才允许快进合并；合并不自动转为部署。
+- **Verification gate**：全部相关测试通过；评审身份独立；合并目标正确；容器、jj workspace、注册项、终端和临时目录清理完成。
+
+### P3.4 汇总指标并决定路由策略
+
+- **Files**：创建 `docs/evaluation/`、`src/services/metrics.ts`、`test/unit/metrics/`。
+- **Inputs**：三个试点的任务书、运行回执、测试结果、评审记录、成本和时延。
+- **Outputs**：统一指标表、通道与复杂度对照、采用/暂缓/重复/拒绝决定、后续是否保留双闸门的建议。
+- **Accept rule**：同时报告成功率、一次通过率、返修轮数、成本、时延、越界率和证据完整性；保留阴性结果和无效样本；一次只改变一个主要变量。
+- **Verification gate**：指标可由原始回执重算；任何默认路由建议都标注证据范围和不确定性；未达样本量或证据不足时只能暂缓，不得宣称最优。
+
+### P3.5 更新文档、技能与最终复核
+
+- **Files**：修改 `governance-design.md`、`governance-tasks.md`、`workflow-profiles-plan.md`、`governance-review.md`、`governance-review.html`；创建 `docs/research/session-workflow-analysis.md` 和 `execution/review-package.md`。
+- **Inputs**：P0–P3.4 全部实现与试点证据、现有 runbook、orca-coord skill。
+- **Outputs**：工作流类型设计定稿、计划完成状态、会话证据分析、全量 diff 复核包和最终复核结论。
+- **Accept rule**：文档与实际接口一致；研究/实验/工程边界一致；旧 v1 行为未被改写；没有未处置的中高严重度问题。
+- **Verification gate**：最终独立复核覆盖全部变更；`pnpm check`、`pnpm test:integration`、`pnpm test:isolation`、`pnpm test:conformance` 全部通过；资源计数回到基准。
+
+## 10. 验收门
+
+原有 G0–G12 必须先保持通过。新增门如下：
+
+| 门 | 必须提交的证据 | 对应任务 |
+|---|---|---|
+| WP-G0 | 当前失败修复完成，集成与隔离全部通过 | P0.1 |
+| WP-G1 | T6.1–T7.2 全部完成 | P0.2–P0.6 |
+| WP-G2 | v1 兼容、v2 三类任务书和迁移通过 | P1.1 |
+| WP-G3 | 状态机、证据类型和 NOT-READY 豁免通过 | P1.2 |
+| WP-G4 | 角色材料 v2、通道注入、hash 和敏感扫描通过 | P1.3 |
+| WP-G5 | 探索型研究可在报告后结束且证据可追溯 | P2.1、P3.1 |
+| WP-G6 | 对照实验基线、单变量、独立评测、分母和阴性结果完整 | P2.2、P3.2 |
+| WP-G7 | 简单单终审与高风险双闸门均可执行，豁免可审计 | P2.3、P3.3 |
+| WP-G8 | 三项试点完成，模型路由没有未经证实的默认结论 | P3.1–P3.3 |
+| WP-G9 | 指标可重算，采用/暂缓决定有证据范围 | P3.4 |
+| WP-G10 | 全部测试、资源清理、文档和最终复核通过 | P3.5 |
+
+## 11. 开工与交付检查
+
+### 开工前
+
+- [ ] P0.1 已核实真实 `lastError`，没有把失败归因于模型。
+- [ ] 每个波次的文件所有权无交集；真实模型试点串行。
+- [ ] 所有临时仓库、Run、容器和凭据均为测试专用。
+- [ ] 已记录桌面 Command 与 settings 绝对路径修复及 `run_fc20a8144bf5` 的 ready/worker_done 回执；若配置再次变化先暂停并复核。
+- [ ] 需要真实模型的试点已获用户确认。
+- [ ] v1 任务书、现有评审和合并行为不会被静默改变。
+
+### 交付前
+
+- [ ] `pnpm check`、`pnpm test:integration`、`pnpm test:isolation`、`pnpm test:conformance` 全部执行并通过。
+- [ ] 原 G0–G12 与 WP-G0–WP-G10 证据齐全。
+- [ ] 研究和实验没有自动合并或部署；工程合并有独立评审和版本回执。
+- [ ] 没有凭据、完整环境变量或不必要的模型输出进入日志。
+- [ ] 没有遗留 Agent、容器、jj workspace、注册项、终端、临时目录或未说明的外部副作用。
+- [ ] 评审、评估、总审身份和 Session 边界清晰，没有自我签核。
+- [ ] 最终复核确认没有未处置的中高严重度问题，或已明确列出并交由用户决定。
