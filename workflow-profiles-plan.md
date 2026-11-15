@@ -118,23 +118,25 @@ flowchart TD
 |---|---|
 | P0.1 | `src/adapters/orca.ts`、`src/services/claims.ts`、`test/integration/recovery/` |
 | P0.2 | `test/conformance/`、`package.json` 中的一致性测试脚本 |
-| P0.3 | `src/services/budgets.ts`、`src/services/status.ts`、`test/unit/budgets/` |
+| P0.3 | `src/services/budgets.ts`、`src/services/status.ts`、`src/services/claims.ts`、`src/services/reviews.ts`、`src/api.ts`、`test/unit/budgets/` |
 | P0.4 | `docs/pilot/`、`runbook.md`、`/Users/souler/yfp/.claude/skills/orca-coord/SKILL.md` |
 | P0.5 | `deploy/nix/` |
 | P0.6 | `test/isolation/nix/` |
-| P1.1 | `src/domain/task-spec.ts`、`src/domain/workflow-spec.ts`、`src/domain/errors.ts`、`src/db/migrations.ts`、`test/unit/domain/` |
-| P1.2 | `src/state/workflow-profiles.ts`、`src/services/workflow-state.ts`、`src/services/ports.ts`、`src/domain/evidence.ts`、`test/unit/state/` |
-| P1.3 | `src/prompts/prompt-set.ts`、`prompts/`、`src/services/model-channels.ts`、`src/config.ts`、`test/unit/prompts/`、`test/unit/model-channels/`、`deploy/README.md` |
+| P1.1 | `src/domain/task-spec.ts`、`src/domain/workflow-spec.ts`、`src/domain/errors.ts`、`src/db/migrations.ts`、`src/services/tasks.ts`、`src/services/workspaces.ts`、`test/unit/domain/` |
+| P1.2 | `src/state/workflow-profiles.ts`、`src/services/workflow-state.ts`、`src/services/ports.ts`、`src/domain/evidence.ts`、`src/services/cleanup.ts`、`test/unit/state/` |
+| P1.3 | `src/prompts/prompt-set.ts`、`prompts/`、`src/services/model-channels.ts`、`src/config.ts`、`src/services/claims.ts`、`src/services/ports.ts`、`src/adapters/orca.ts`、`test/unit/prompts/`、`test/unit/model-channels/`、`deploy/README.md` |
 | P2.1 | `src/services/research.ts`、`src/services/research-evidence.ts`、`test/unit/research/`、`test/integration/research/` |
 | P2.2 | `src/services/experiments.ts`、`src/services/judge.ts`、`test/unit/experiments/`、`test/integration/experiments/` |
-| P2.3 | `src/services/review-gates.ts`、`src/services/reviews.ts`、`src/services/merges.ts`、`test/unit/review-gates/` |
+| P2.3 | `src/services/review-gates.ts`、`src/services/reviews.ts`、`src/services/merges.ts`、`src/services/claims.ts`、`test/unit/review-gates/` |
 | P3.1 | `docs/pilots/research/` |
 | P3.2 | `docs/pilots/experiment/` |
 | P3.3 | `docs/pilots/engineering/` |
 | P3.4 | `docs/evaluation/`、`src/services/metrics.ts`、`test/unit/metrics/` |
-| P3.5 | `governance-design.md`、`governance-tasks.md`、`workflow-profiles-plan.md`、`docs/research/session-workflow-analysis.md`、`execution/review-package.md` |
+| P3.5 | `governance-design.md`、`governance-tasks.md`、`workflow-profiles-plan.md`、`governance-review.md`、`governance-review.html`、`docs/research/session-workflow-analysis.md`、`execution/review-package.md` |
 
 `execution/` 只保存执行过程记录，已由忽略规则排除，不作为实现任务的交付源码。任何新错误码统一归 P1.1，其他任务不得新增错误码文件或改写既有错误码语义。
+
+顺序共享文件说明：P0.1 只做失败诊断，`claims.ts` 的后续写入按 P0.3→P1.3→P2.3 顺序执行；`ports.ts` 按 P1.2→P1.3 顺序执行；同一文件跨阶段只能在上一波次完成后修改，禁止并行写入。
 
 ## 6. Phase 0：基线修复与剩余工程任务
 
@@ -156,10 +158,10 @@ flowchart TD
 
 ### P0.3 完成 T6.2 预算、状态摘要和事件通知
 
-- **Files**：创建 `src/services/budgets.ts`、`src/services/status.ts`、`test/unit/budgets/`。
+- **Files**：创建 `src/services/budgets.ts`、`src/services/status.ts`、`test/unit/budgets/`；修改 `src/services/claims.ts`、`src/services/reviews.ts`、`src/api.ts`。
 - **Inputs**：设计 §11.2、T1.2 事件记录、T5.3 角色配置。
-- **Outputs**：活动任务与评审并发限制、状态摘要、阻塞原因、下一步和状态变化通知。
-- **Accept rule**：达到预算时等待，不自动换模型；普通进度不通知人；异常包含可执行下一步；构建并发与供应商准入仍按已裁定的延后项处理。
+- **Outputs**：活动任务与评审并发限制、状态摘要、阻塞原因、下一步和状态变化通知；任务/评审派发前的准入检查与 handler 接线。
+- **Accept rule**：达到预算时等待，不自动换模型；普通进度不通知人；异常包含可执行下一步；构建并发与供应商准入仍按已裁定的延后项处理。每次 claim 或 review workerStart 前必须检查活动任务/评审数；达到两任务一评审时等待，不能只在 status 摘要中显示而不阻断。
 - **Verification gate**：验证两个任务和一个评审上限；模拟供应商 429、消息重复和通知失败，均不改变治理状态。
 
 ### P0.4 完成 T6.3 真实 Agent 试点与工作流更新
@@ -190,26 +192,26 @@ flowchart TD
 
 ### P1.1 实现 TaskSpec v2 与迁移
 
-- **Files**：修改 `src/domain/task-spec.ts`；创建 `src/domain/workflow-spec.ts`；追加 `src/db/migrations.ts`；修改 `src/domain/errors.ts` 和 `test/unit/domain/`。
+- **Files**：修改 `src/domain/task-spec.ts`；创建 `src/domain/workflow-spec.ts`；追加 `src/db/migrations.ts`；修改 `src/domain/errors.ts`、`src/services/tasks.ts`、`src/services/workspaces.ts` 和 `test/unit/domain/`。
 - **Inputs**：现有 v1 schema、设计 §6、会话证据中的三类交付物。
-- **Outputs**：`workType`（`research`/`experiment`/`engineering`）、`complexity`（`simple`/`medium`/`complex`）、`stageChannels`、三类 profile-specific spec、v1→v2 迁移和读取分支；`agentPolicy` 继续表示 harness 选择，与 `stageChannels` 的模型 settings 注入分离。
-- **Accept rule**：v1 输入继续按工程语义处理；v2 必填字段按类型校验；研究和实验不要求 `baseCommitId` 或 bookmark；`stageChannels` 只引用已配置通道，不携带凭据；模型默认值不得新增。`agentPolicy` 在 v2 中保留为 harness 选择，v1 的 literal/enum 语义不变，`claims.ts` 的 `workerStart.agent` 来源对 v1/v2 一致，模型只通过 settings 注入切换。
+- **Outputs**：`workType`（`research`/`experiment`/`engineering`）、`complexity`（`simple`/`medium`/`complex`）、`stageChannels`、三类 profile-specific spec、v1→v2 迁移和读取分支；`agentPolicy` 继续表示 harness 选择，与 `stageChannels` 的模型 settings 注入分离。消费者分支：`tasks.ts`/`workspaces.ts` 中 v1 的 target/baseCommitId 持久化与 workspace 创建保持不变；research/experiment 使用 runRoot/artifactRoot，不持久化工程 target/baseCommitId，不创建代码 workspace；engineering 保持现状。
+- **Accept rule**：v1 输入继续按工程语义处理；v2 必填字段按类型校验；研究和实验不要求 `baseCommitId` 或 bookmark；`stageChannels` 只引用已配置通道，不携带凭据；模型默认值不得新增。`agentPolicy` 在 v2 中保留为 harness 选择，v1 的 literal/enum 语义不变，`claims.ts` 的 `workerStart.agent` 来源对 v1/v2 一致，模型只通过 settings 注入切换。`tasks.ts` 与 `workspaces.ts` 必须按 workType 分支处理，不能要求研究/实验携带工程基线。
 - **Verification gate**：旧任务解析不变；未知字段、错误类型、缺失基线（对照实验）、缺失来源范围（研究）均拒绝；迁移幂等且可回滚。
 
 ### P1.2 实现按类型分状态机与证据记录
 
-- **Files**：创建 `src/state/workflow-profiles.ts`、`src/services/workflow-state.ts`、`src/domain/evidence.ts`；修改 `src/services/ports.ts` 和 `test/unit/state/`。
+- **Files**：创建 `src/state/workflow-profiles.ts`、`src/services/workflow-state.ts`、`src/domain/evidence.ts`、`src/services/cleanup.ts`；修改 `src/services/ports.ts` 和 `test/unit/state/`。
 - **Inputs**：设计 §7、§13；P1.1 profile 类型；现有任务/认领/操作记录。
-- **Outputs**：研究状态 `collecting/analyzing/decision_review/done/parked`、实验状态 `design_review/running/benchmarking/report_review/decided/parked`、证据类型 `source/run-receipt/metric/decision`、操作员豁免记录。
-- **Accept rule**：非法迁移拒绝；研究到工程必须新建工程任务；实验禁止直接 merge；`NOT_READY` 未记录操作员豁免不得继续；外部结果不确定时不自动重试。
+- **Outputs**：研究状态 `collecting/analyzing/decision_review/done/parked`、实验状态 `design_review/running/benchmarking/report_review/decided/parked`、证据类型 `source/run-receipt/metric/decision`、操作员豁免记录。完整迁移边与终态映射：研究 `DECLARED→COLLECTING→ANALYZING→DECISION_REVIEW→DONE/PARKED`，退回可回 `ANALYZING`，预算耗尽/人工取消到 `PARKED/CANCELLED`；实验 `DECLARED→DESIGN_REVIEW→RUNNING→BENCHMARKING→REPORT_REVIEW→DECIDED/PARKED`，设计退回可回 `DESIGN_REVIEW`，预算内重跑可回 `RUNNING`，预算耗尽到 `PARKED`，取消到 `CANCELLED`。研究和实验的 `DONE`/`DECIDED` 都是业务终态，不走 `MERGED`；完成/取消/中止后均经 archive+cleanup，`cleanup_pending` 可重试，不调用 confirmMerge。
+- **Accept rule**：非法迁移拒绝；研究到工程必须新建工程任务；实验禁止直接 merge；`NOT_READY` 未记录操作员豁免不得继续；外部结果不确定时不自动重试。状态名、迁移边、重试/停止条件和清理动作一一对应；非工程终态不得进入 confirmMerge。
 - **Verification gate**：覆盖全部合法边、终态无出边、豁免留痕、证据不可改写、重复恢复不产生重复副作用。
 
 ### P1.3 实现角色材料 v2 与模型通道注入
 
-- **Files**：修改 `src/prompts/prompt-set.ts`、`src/config.ts`；创建 `prompts/` 下按类型和复杂度划分的材料、`src/services/model-channels.ts`、`test/unit/prompts/`、`test/unit/model-channels/`；修改 `deploy/README.md`。
+- **Files**：修改 `src/prompts/prompt-set.ts`、`src/config.ts`、`src/services/claims.ts`、`src/services/ports.ts`、`src/adapters/orca.ts`；创建 `prompts/` 下按类型和复杂度划分的材料、`src/services/model-channels.ts`、`test/unit/prompts/`、`test/unit/model-channels/`；修改 `deploy/README.md`。
 - **Inputs**：设计 §12、现有四模板装配、模型路由候选、`~/.cenv/` 文件名（不读取内容）。
-- **Outputs**：独立的 v2 材料版本标识与 manifest/hash、`prompts/v2/<profile>/<role>-<complexity>.md` 材料、绝对路径 settings 注入和通道回执；v1 根目录四份模板及其 `promptSetHash` 行为不变。
-- **Accept rule**：模板不包含模型名、令牌或管理命令教程；hash 只用于材料完整性；注入路径不得使用 `~`；不同角色可使用不同 Session 或新上下文；hook 失效不改变容器权限；v1 根目录四份模板及其解析/哈希行为保持可用，v2 材料必须位于 `prompts/v2/<profile>/` 子目录并使用独立 manifest/hash，未知 profile 失败关闭。
+- **Outputs**：独立的 v2 材料版本标识与 manifest/hash、`prompts/v2/<profile>/<role>-<complexity>.md` 材料、绝对路径 settings 注入和通道回执；v1 根目录四份模板及其 `promptSetHash` 行为不变。真实启动链路：`TaskSpec.stageChannels → claim 通道解析 → claims.workerStart({settings: 绝对路径}) → ports/orca.workerStart → Orca worker-start`；`workerStart.agent` 的 harness 选择不变。
+- **Accept rule**：模板不包含模型名、令牌或管理命令教程；hash 只用于材料完整性；注入路径不得使用 `~`；不同角色可使用不同 Session 或新上下文；hook 失效不改变容器权限；v1 根目录四份模板及其解析/哈希行为保持可用，v2 材料必须位于 `prompts/v2/<profile>/` 子目录并使用独立 manifest/hash，未知 profile 失败关闭。启动适配器必须接收并转发 settings 绝对路径，不能用 Agent 传入的 `~`、身份字段或 shell 拼接；必须能用假 Orca 适配器验证 settings 到达启动入口。
 - **Verification gate**：材料清单与 hash 确定；占位符无残留；通道切换只改变 settings 文件；敏感内容扫描通过；简单/中等/复杂三种模板均能被正确装配。
 
 ## 8. Phase 2：三类工作流实现
@@ -232,10 +234,10 @@ flowchart TD
 
 ### P2.3 实现工程风险分级评审与豁免
 
-- **Files**：创建 `src/services/review-gates.ts`；修改 `src/services/reviews.ts`、`src/services/merges.ts`、`test/unit/review-gates/`。
+- **Files**：创建 `src/services/review-gates.ts`；修改 `src/services/reviews.ts`、`src/services/merges.ts`、`src/services/claims.ts`、`test/unit/review-gates/`。
 - **Inputs**：现有工程评审与合并流程、`docs/research/codex-double-gate-evidence.md`、复杂度字段。
-- **Outputs**：简单任务单次终审策略、标准/高风险规格与实现双闸门、操作员豁免记录和部署人工决定点。
-- **Accept rule**：简单任务允许一次终审；标准或高风险必须先规格评审再实现评审；规格 NOT-READY 未豁免不得进入实现；评审不替代测试；合并后仍需人工决定部署。既有 `Opus 终审 + Codex impl-mode` 路径保留为对照，KIMI 总审仅作为试点候选，不写成默认要求。
+- **Outputs**：简单任务单次终审策略、标准/高风险规格与实现双闸门、实现前规格评审回执与 accept 授权检查、操作员豁免记录和部署人工决定点。规格评审不依赖已有 submission；accept 仅在规格评审通过或存在操作员豁免时允许写权限切换。
+- **Accept rule**：简单任务允许一次终审；标准或高风险必须先规格评审再实现评审；规格 NOT-READY 未豁免不得进入实现；评审不替代测试；合并后仍需人工决定部署。既有 `Opus 终审 + Codex impl-mode` 路径保留为对照，KIMI 总审仅作为试点候选，不写成默认要求。规格评审 NOT-READY 或缺失时，`claims.ts` 不得调用 setWritable；豁免必须记录操作者、理由和时间；实现评审仍按原提交评审路径执行。
 - **Verification gate**：单终审路径与双闸门路径分别通过；豁免可审计；未豁免的 NOT-READY 被阻断；没有自动 push 或部署。
 
 ## 9. Phase 3：试点与评估

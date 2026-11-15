@@ -4,19 +4,19 @@
 
 ## 方案与实现交付
 
-- `.../0831Test/a18cc726-830e-4e3a-9e44-bdf9a482df7c.jsonl`：架构交接物、并行评审、实现与推送；说明设计评审与实现可分阶段，但可同会话连续完成，分支去向由人决定。
-- `.../feat-actor-agent-0930/6778ef10-1121-4ac8-bde9-ffb12aed2465.jsonl`：子代理调研、grill-with-docs、四相位实现、Codex 终审，测试通过后由人决定分支去向。
-- `.../esm-sim-agent/43d86840-eda6-44a7-a092-4ccfe213366c.jsonl`：五路 Research、Critique、FitAudit、调研报告，之后另有实现提交。探索型研究可以止于报告，也可以引出工程任务。
-- `.../harness-learn/6c688a5a-77a2-452f-b800-30f767486522.jsonl`：开放研究在观察窗口内仍未结束，说明研究也需要时间盒和退出条件。
+- `/Users/souler/yfp/.claude/projects/-Users-souler-orca-workspaces-agents-impl-0831Test/a18cc726-830e-4e3a-9e44-bdf9a482df7c.jsonl`：架构交接物、并行评审、实现与推送；说明设计评审与实现可分阶段，但可同会话连续完成，分支去向由人决定。
+- `/Users/souler/yfp/.claude/projects/-Users-souler-orca-workspaces-agents-impl-feat-actor-agent-0930/6778ef10-1121-4ac8-bde9-ffb12aed2465.jsonl`：子代理调研、grill-with-docs、四相位实现、Codex 终审，测试通过后由人决定分支去向。
+- `/Users/souler/yfp/.claude/projects/-Users-souler-Documents-daqian-esm-sim-agent/43d86840-eda6-44a7-a092-4ccfe213366c.jsonl`：五路 Research、Critique、FitAudit、调研报告，之后另有实现提交。探索型研究可以止于报告，也可以引出工程任务。
+- `/Users/souler/yfp/.claude/projects/-Users-souler-Documents-harness-learn/6c688a5a-77a2-452f-b800-30f767486522.jsonl`：开放研究在观察窗口内仍未结束，说明研究也需要时间盒和退出条件。
 
 ## 实验交付
 
-- `.../actor-room-impl/0d6bc45d-99d5-49f3-a52c-789530dd193f.jsonl`：先审阅已有实验，再搭 mock 实验台，完成 6+2 个实验组并交付对比 HTML 和缺陷表。提交未推送，终点是证据包和下一步决定，不是自动合并。该会话有 8327 条消息，成本约 $733，证明需要预算和停止条件。
+- `/Users/souler/yfp/.claude/projects/-Users-souler-Documents-daqian-snow-mystery-agg-agents-impl--claude-worktrees-actor-room-impl/0d6bc45d-99d5-49f3-a52c-789530dd193f.jsonl`：先审阅已有实验，再搭 mock 实验台，完成 6+2 个实验组并交付对比 HTML 和缺陷表。提交未推送，终点是证据包和下一步决定，不是自动合并。该会话有 8327 条消息，成本约 $733，证明需要预算和停止条件。
 
 ## OpenCode 与 OMP
 
-- OpenCode 的 `实现 legacy pin 别名表兼容部署`、`实现 story-actor devtool` 等记录显示明确规格→执行→测试→提交的实现路径；探索子代理则只读产出报告。OpenCode 记录只到 2026-09-17。
-- OMP 的 189 源调研、PERS 子代理群和 CTX 实验记录显示采集→综合→报告或新实验；同一会话内多次换模型，说明模型是执行通道而非角色身份。
+- OpenCode 数据库 `/Users/souler/.local/share/opencode/opencode.db` 中 session `ses_f57ab2373ffedSivG9EMMrcdQ3`、`ses_f5ad8b8a9ffebXG4xH0FDPvXCf` 的 `实现 legacy pin 别名表兼容部署`、`实现 story-actor devtool` 等记录显示明确规格→执行→测试→提交的实现路径；探索子代理则只读产出报告。OpenCode 记录只到 2026-09-17。
+- OMP 的 189 源调研（`/Users/souler/.omp/agent/sessions/-Desktop-ressearch/2026-11-13T16-17-29-667Z_01a1d5b3-2443-7214-91d6-3e076df0ecb8.jsonl`）、PERS 子代理群和 CTX 实验记录显示采集→综合→报告或新实验；同一会话内多次换模型，说明模型是执行通道而非角色身份。
 
 ## 证据边界
 
