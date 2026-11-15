@@ -12,7 +12,7 @@
 
 1. **探索型研究**：以报告、适配分析或 ADR 为交付物，不要求对照实验，也不要求代码合并。
 2. **对照实验**：以假设、基线、变量矩阵、运行回执、指标和采用决定为交付物，不自动合并实验产物。
-3. **工程交付**：以任务书、ADR、实施计划、代码差异、测试与评审回执为交付物，按风险选择单次终审或规格与实现双闸门后合并。
+3. **工程交付**：以任务书、ADR、实施计划、代码差异、测试与评审回执为交付物，按 `riskLevel` 选择一次终审（low）、规格与实现双闸门（medium）或规格评审→实现评审→独立总审（high）后合并；风险覆盖复杂度，simple+high 仍走三段评审链。
 
 三类任务共用认领、环境隔离、身份、证据、操作恢复和资源清理。任务书、状态迁移、验收证据和角色材料按交付类型分别定义，不新建第二套 Agent 系统。
 
@@ -74,7 +74,7 @@ flowchart TD
 | 状态与证据 | 按类型限制状态迁移、记录来源/运行/指标/决策证据 |
 | 研究服务 | 生成来源清单、报告或 ADR，并允许在报告后结束 |
 | 实验服务 | 锁定实验设计，保存运行回执和独立评测结果 |
-| 工程评审 | 按风险决定单次终审或规格与实现双闸门 |
+| 工程评审 | 按 `riskLevel`（low/medium/high）决定一次终审、规格与实现双闸门、或双闸门加独立总审；`complexity` 只控制提示词深度，风险覆盖复杂度 |
 | 模型通道 | 通过绝对路径的 settings 文件选择执行通道，不进入提示词正文 |
 | 评估与发布 | 比较成功率、返修、成本、时延和证据完整性，形成采用或暂缓决定 |
 
@@ -87,7 +87,7 @@ flowchart TD
 | D3 | 研究分探索型和对照实验型 | 报告退出条件与实验指标退出条件不同 |
 | D4 | 实验不自动合并，采用后另建工程任务 | 防止研究证据直接变成未审查的工程变更 |
 | D5 | 默认两层 Session，复杂任务才增加任务负责人 | 近期样本主要是主会话加一层子代理 |
-| D6 | 评审按风险分级 | 高风险需要规格与实现双闸门，低风险可一次终审 |
+| D6 | 工程评审按 `riskLevel` 风险分级，风险覆盖复杂度 | low 一次终审；medium 规格评审→实现评审；high 规格评审→实现评审→独立总审；simple+high 仍走三段链，complex+low 不因复杂度加闸门；`complexity` 只控制提示词深度 |
 | D7 | 模型路由先做三项试点 | 现有证据不足以证明固定分工 |
 | D8 | 先完成 T6.1–T7.2 和当前失败修复 | 防止将环境变量误读为架构或模型问题 |
 
@@ -168,9 +168,9 @@ flowchart TD
 
 - **Files**：创建 `docs/pilot/`；修改 `runbook.md` 和 `/Users/souler/yfp/.claude/skills/orca-coord/SKILL.md`。
 - **Inputs**：G0–G10 通过证据、一个纯逻辑真实任务、真实 Orca/jj/Docker、OpenCode 开发与 Claude 或 Codex 评审。
-- **Outputs**：试点任务书、真实回执、模型与版本、耗时、评审轮数、异常、资源清理记录和最终 runbook。
-- **Accept rule**：完成直接通过、评审退回后继续、目标移动后重新验收、父子任务和两个并行任务；不使用手工 `task-update`、通用 CLI 或自动 push。
-- **Verification gate**：全部结果来自真实 Orca/jj/Docker；runbook 与实际步骤一致；Orca 注册、终端、容器和临时目录清理完成。
+- **Outputs**：试点任务书、真实回执、模型与版本、耗时、评审轮数、异常、资源清理记录、经 server API 的 submit、评审动作与 split 路径证据和最终 runbook。
+- **Accept rule**：完成直接通过、评审退回后继续、目标移动后重新验收、父子任务和两个并行任务；不使用手工 `task-update`、通用 CLI 或自动 push。试点必须包含至少一次经 server API 的 submit、至少一次评审动作（review-request/review-accept/review-submit 之一）和一次 split 路径；任一动作返回未注册即失败，不得以绕过 API 直接调用服务冒充。
+- **Verification gate**：全部结果来自真实 Orca/jj/Docker；runbook 与实际步骤一致；Orca 注册、终端、容器和临时目录清理完成；经 server API 的 submit、评审与 split 证据齐全，未注册路径判失败而非绕过。
 
 ### P0.5 完成 T7.1 Nix 环境接入
 
@@ -194,9 +194,9 @@ flowchart TD
 
 - **Files**：修改 `src/domain/task-spec.ts`；创建 `src/domain/workflow-spec.ts`；追加 `src/db/migrations.ts`；修改 `src/domain/errors.ts`、`src/services/tasks.ts`、`src/services/workspaces.ts`、`src/api.ts`、`src/services/claims.ts`、`src/server.ts` 和 `test/unit/domain/`。
 - **Inputs**：现有 v1 schema、设计 §6、会话证据中的三类交付物。
-- **Outputs**：`workType`（`research`/`experiment`/`engineering`）、`complexity`（`simple`/`medium`/`complex`）、`stageChannels`、三类 profile-specific spec、v1→v2 迁移和读取分支；`agentPolicy` 继续表示 harness 选择，与 `stageChannels` 的模型 settings 注入分离。消费者分支：`tasks.ts`/`workspaces.ts` 中 v1 的 target/baseCommitId 持久化与 workspace 创建保持不变；research/experiment 使用 runRoot/artifactRoot，不持久化工程 target/baseCommitId，不创建代码 workspace；engineering 保持现状。按 workType 分发的 declare/claim 处理器：复用现有 `declare`/`claim` 动作，不发明新的动作名；research/experiment 使用 `runRoot` 作为工作目录与证据根目录，跳过 `prepareWorkspace` 的代码 workspace 创建，workerStart 以 runRoot 启动；engineering 仍走原代码 workspace。按类型的预算字段与扣减语义：research 为 `maxSources`、`maxSourceBytes`、`maxWallSeconds`，达到来源或时间预算即停止并保留已收集证据；experiment 为 `maxRuns`、`maxConcurrentRuns`、`maxRunSeconds`、`maxWallSeconds`、`maxEvidenceBytes`；`maxWallSeconds` 是任务级墙钟总预算，区别于单次运行的 `maxRunSeconds`，worker 令牌有效期取 `min(maxWallSeconds, 配置上限)`，恢复时继续使用同一有效期，缺失期限不得被解释为永不过期；每次运行前检查，超限停止，不自动重试；v1 的 `maxReviewRounds`/`maxWallSeconds`/`maxEvidenceBytes` 兼容语义保留，engineering 不新增字段。资源语义：`runRoot` 是临时执行目录，必须登记为可销毁清理项；`artifactRoot` 是交付目录，只登记归档与保留状态，不得被普通清理删除；`src/db/migrations.ts` 的清理项类型必须覆盖 runRoot 与 artifactRoot，并区分 destroy 与 retain。server 装配：生产启动时由 `createOrcaAdapter`、`createJjAdapter`、`createEnvironmentAdapter` 和 trustProvision 构造 `claimDeps` 并传入 `registerCoreHandlers`，不得只创建空注册表。
-- **Accept rule**：v1 输入继续按工程语义处理；v2 必填字段按类型校验；研究和实验不要求 `baseCommitId` 或 bookmark；`stageChannels` 只引用已配置通道，不携带凭据；模型默认值不得新增。`agentPolicy` 在 v2 中保留为 harness 选择，v1 的 literal/enum 语义不变，`claims.ts` 的 `workerStart.agent` 来源对 v1/v2 一致，模型只通过 settings 注入切换。`tasks.ts` 与 `workspaces.ts` 必须按 workType 分支处理，不能要求研究/实验携带工程基线。`api.ts` 必须能按 workType 将请求路由到 research/experiment handler；`claims.ts` 必须支持 runRoot 启动而非只接受 hostPath；研究/实验不能直接复用 engineering 的 baseCommit/workspace 前置。预算字段必须进入 v2 schema，来源/运行预算在每次派发前扣减或拒绝，不能只写在文档或状态摘要里。declare/claim/accept 的 handler 在 server 启动后必须已注册，不能因缺少 `claimDeps` 返回 unregistered；单测必须验证 server 装配后的 declare/claim/accept 调用路径。experiment 必须同时支持 run-level 与 task-level 时间预算，`claims.ts` 不得只用 `maxRunSeconds` 或缺失字段签发令牌。
-- **Verification gate**：旧任务解析不变；未知字段、错误类型、缺失基线（对照实验）、缺失来源范围（研究）均拒绝；迁移幂等且可回滚。
+- **Outputs**：`workType`（`research`/`experiment`/`engineering`）、`complexity`（`simple`/`medium`/`complex`，只控制提示词深度）、`riskLevel`（`low`/`medium`/`high`，engineering 专用，控制工程评审路径，research/experiment 不用 `riskLevel` 决定业务终态）、`stageChannels`、三类 profile-specific spec、v1→v2 迁移和读取分支；`agentPolicy` 继续表示 harness 选择，与 `stageChannels` 的模型 settings 注入分离。消费者分支：`tasks.ts`/`workspaces.ts` 中 v1 的 target/baseCommitId 持久化与 workspace 创建保持不变；research/experiment 使用 runRoot/artifactRoot，不持久化工程 target/baseCommitId，不创建代码 workspace；engineering 保持现状。按 workType 分发的 declare/claim 处理器：复用现有 `declare`/`claim` 动作，不发明新的动作名；research/experiment 使用 `runRoot` 作为工作目录与证据根目录，跳过 `prepareWorkspace` 的代码 workspace 创建，workerStart 以 runRoot 启动；engineering 仍走原代码 workspace。按类型的预算字段与扣减语义：research 为 `maxSources`、`maxSourceBytes`、`maxWallSeconds`，达到来源或时间预算即停止并保留已收集证据；experiment 为 `maxRuns`、`maxConcurrentRuns`、`maxRunSeconds`、`maxWallSeconds`、`maxEvidenceBytes`；`maxWallSeconds` 是任务级墙钟总预算，区别于单次运行的 `maxRunSeconds`，worker 令牌有效期取 `min(maxWallSeconds, 配置上限)`，恢复时继续使用同一有效期，缺失期限不得被解释为永不过期；每次运行前检查，超限停止，不自动重试；v1 的 `maxReviewRounds`/`maxWallSeconds`/`maxEvidenceBytes` 兼容语义保留，engineering 不新增字段。资源语义：`runRoot` 是临时执行目录，必须登记为可销毁清理项；`artifactRoot` 是交付目录，只登记归档与保留状态，不得被普通清理删除；`src/db/migrations.ts` 的清理项类型必须覆盖 runRoot 与 artifactRoot，并区分 destroy 与 retain。server 装配：生产启动时由同一组已创建的 `createOrcaAdapter`、`createJjAdapter`、`createEnvironmentAdapter` 和 trustProvision 构造 `claimDeps`、`reviewDeps` 与 `childrenDeps`，一并传入 `registerCoreHandlers`，不得只创建空注册表，也不得只装配 `claimDeps`；`reviewDeps` 使用现有 `OrcaMessagingPort`、`JjVersionPort`、`EnvLifecyclePort` 及可选 `stepTimeoutMs`，`childrenDeps` 使用现有 `OrcaSettlementPort`、`JjMergePort & JjChildAdvancePort`、`EnvLifecyclePort` 及现有 `trustProvision`/`stepTimeoutMs` 可选配置；不新增第二套服务或适配器层，不改变 `recoveryDeps` 语义。
+- **Accept rule**：v1 输入继续按工程语义处理；v2 必填字段按类型校验；v2 engineering 必须显式提供 `riskLevel`，缺失或未知值拒绝，不凭空推断 v1 旧任务的风险等级，只有显式升级 v2 时才要求提供该字段，`riskLevel` 不是模型通道，不改变 `agentPolicy`/harness 语义；研究和实验不要求 `baseCommitId` 或 bookmark；`stageChannels` 只引用已配置通道，不携带凭据；模型默认值不得新增。`agentPolicy` 在 v2 中保留为 harness 选择，v1 的 literal/enum 语义不变，`claims.ts` 的 `workerStart.agent` 来源对 v1/v2 一致，模型只通过 settings 注入切换。`tasks.ts` 与 `workspaces.ts` 必须按 workType 分支处理，不能要求研究/实验携带工程基线。`api.ts` 必须能按 workType 将请求路由到 research/experiment handler；`claims.ts` 必须支持 runRoot 启动而非只接受 hostPath；研究/实验不能直接复用 engineering 的 baseCommit/workspace 前置。预算字段必须进入 v2 schema，来源/运行预算在每次派发前扣减或拒绝，不能只写在文档或状态摘要里。declare、claim、accept、submit、fail、cancel、rebase、review-request、review-accept、review-submit、manual-approve、split 的 handler 在 server 启动后必须已注册并能到达相应 handler，不能因缺少 `claimDeps`/`reviewDeps`/`childrenDeps` 返回 unregistered；单测必须验证 server 装配后这些动作的装配路径。experiment 必须同时支持 run-level 与 task-level 时间预算，`claims.ts` 不得只用 `maxRunSeconds` 或缺失字段签发令牌。
+- **Verification gate**：旧任务解析不变；未知字段、错误类型、缺失基线（对照实验）、缺失来源范围（研究）均拒绝；v2 engineering 缺失或未知 `riskLevel` 拒绝；迁移幂等且可回滚。启动装配证据：生产启动后 declare、claim、accept、submit、fail、cancel、rebase、review-request、review-accept、review-submit、manual-approve、split 均注册并可到达相应 handler，单测与启动证据须证明 `reviewDeps`/`childrenDeps` 不是只在类型层出现。
 
 ### P1.2 实现按类型分状态机与证据记录
 
@@ -235,10 +235,10 @@ flowchart TD
 ### P2.3 实现工程风险分级评审与豁免
 
 - **Files**：创建 `src/services/review-gates.ts`；修改 `src/services/reviews.ts`、`src/services/merges.ts`、`src/services/claims.ts`、`test/unit/review-gates/`。
-- **Inputs**：现有工程评审与合并流程、`docs/research/codex-double-gate-evidence.md`、复杂度字段。
-- **Outputs**：简单任务单次终审策略、标准/高风险规格与实现双闸门、实现前规格评审回执与 accept 授权检查、操作员豁免记录和部署人工决定点。规格评审不依赖已有 submission；accept 仅在规格评审通过或存在操作员豁免时允许写权限切换。
-- **Accept rule**：简单任务允许一次终审；标准或高风险必须先规格评审再实现评审；规格 NOT-READY 未豁免不得进入实现；评审不替代测试；合并后仍需人工决定部署。既有 `Opus 终审 + Codex impl-mode` 路径保留为对照，KIMI 总审仅作为试点候选，不写成默认要求。规格评审 NOT-READY 或缺失时，`claims.ts` 不得调用 setWritable；豁免必须记录操作者、理由和时间；实现评审仍按原提交评审路径执行。
-- **Verification gate**：单终审路径与双闸门路径分别通过；豁免可审计；未豁免的 NOT-READY 被阻断；没有自动 push 或部署。
+- **Inputs**：现有工程评审与合并流程、`docs/research/codex-double-gate-evidence.md`、v2 engineering 的 `riskLevel` 字段与 `complexity` 字段（`complexity` 只控制提示词深度，评审分支由 `riskLevel` 决定）。
+- **Outputs**：`riskLevel` 分级评审策略（low 允许一次终审；medium 必须先规格评审再实现评审；high 必须规格评审→实现评审→独立总审三段链）、实现前规格评审回执与 accept 授权检查、操作员豁免记录和部署人工决定点。规格评审不依赖已有 submission；accept 仅在规格评审通过或存在操作员豁免时允许写权限切换。
+- **Accept rule**：评审路径只由 `riskLevel` 决定，风险覆盖复杂度：low 允许一次终审；medium 必须先规格评审再实现评审；high 必须规格评审→实现评审→独立总审。simple+high 不能走单终审，complex+low 也不因复杂度额外增加闸门；规格 NOT-READY 未豁免不得进入实现；评审不替代测试；合并后仍需人工决定部署。既有 `Opus 终审 + Codex impl-mode` 路径保留为对照，KIMI 总审仅作为试点候选，不写成默认要求。规格评审 NOT-READY 或缺失时，`claims.ts` 不得调用 setWritable；豁免必须记录操作者、理由和时间；实现评审仍按原提交评审路径执行。
+- **Verification gate**：low 单终审、medium 双闸门、high 三段链路径分别通过；`complexity`×`riskLevel` 交叉矩阵至少覆盖 simple+high（仍走三段评审链）与 complex+low（不因复杂度额外加闸门）两个方向，并验证 high 的独立总审身份与方案评审、实现评审相互独立；豁免可审计；未豁免的 NOT-READY 被阻断；没有自动 push 或部署。
 
 ## 9. Phase 3：试点与评估
 
@@ -261,16 +261,16 @@ flowchart TD
 ### P3.3 执行工程交付试点
 
 - **Files**：创建 `docs/pilots/engineering/`。
-- **Inputs**：一个已知工程变更、KIMI 方案与拆解、deepseek 实现和测试、Codex 实现评审、独立总审（KIMI 为试点候选，实际以评审配置为准）。
-- **Outputs**：ADR、实施计划、实现 diff、测试回执、评审处置、合并回执和清理回执。
-- **Accept rule**：按复杂度选择单终审或双闸门；只有评审通过后才允许快进合并；合并不自动转为部署。
-- **Verification gate**：全部相关测试通过；评审身份独立；合并目标正确；容器、jj workspace、注册项、终端和临时目录清理完成。
+- **Inputs**：一个已知工程变更及其 `riskLevel` 与 `complexity`、KIMI 方案与拆解、deepseek 实现和测试、Codex 实现评审、独立总审（KIMI 为试点候选，实际以评审配置为准）。
+- **Outputs**：ADR、实施计划、实现 diff、测试回执、评审处置、合并回执、清理回执和按 `riskLevel` 执行的完整评审链证据（含 simple+high 的三段评审链）。
+- **Accept rule**：评审路径由 `riskLevel` 决定：low 一次终审，medium 先规格评审再实现评审，high 规格评审→实现评审→独立总审；simple+high 仍走三段评审链，不得因复杂度降为单终审；只有评审通过后才允许快进合并；合并不自动转为部署。
+- **Verification gate**：全部相关测试通过；评审身份独立；合并目标正确；容器、jj workspace、注册项、终端和临时目录清理完成；simple+high 案例的规格评审→实现评审→独立总审三段评审链证据齐全。
 
 ### P3.4 汇总指标并决定路由策略
 
 - **Files**：创建 `docs/evaluation/`、`src/services/metrics.ts`、`test/unit/metrics/`。
 - **Inputs**：三个试点的任务书、运行回执、测试结果、评审记录、成本和时延。
-- **Outputs**：统一指标表、通道与复杂度对照、采用/暂缓/重复/拒绝决定、后续是否保留双闸门的建议。
+- **Outputs**：统一指标表、通道、`complexity` 与 `riskLevel` 对照、采用/暂缓/重复/拒绝决定、后续是否保留双闸门的建议。
 - **Accept rule**：同时报告成功率、一次通过率、返修轮数、成本、时延、越界率和证据完整性；保留阴性结果和无效样本；一次只改变一个主要变量。
 - **Verification gate**：指标可由原始回执重算；任何默认路由建议都标注证据范围和不确定性；未达样本量或证据不足时只能暂缓，不得宣称最优。
 
@@ -295,7 +295,7 @@ flowchart TD
 | WP-G4 | 角色材料 v2、通道注入、hash 和敏感扫描通过 | P1.3 |
 | WP-G5 | 探索型研究可在报告后结束且证据可追溯 | P2.1、P3.1 |
 | WP-G6 | 对照实验基线、单变量、独立评测、分母和阴性结果完整 | P2.2、P3.2 |
-| WP-G7 | 简单单终审与高风险双闸门均可执行，豁免可审计 | P2.3、P3.3 |
+| WP-G7 | low 单终审、medium 双闸门、high 双闸门+独立总审（按 `riskLevel`）均可执行，simple+high 仍走三段评审链，豁免可审计 | P2.3、P3.3 |
 | WP-G8 | 三项试点完成，模型路由没有未经证实的默认结论 | P3.1–P3.3 |
 | WP-G9 | 指标可重算，采用/暂缓决定有证据范围 | P3.4 |
 | WP-G10 | 全部测试、资源清理、文档和最终复核通过 | P3.5 |
@@ -316,6 +316,7 @@ flowchart TD
 - [ ] `pnpm check`、`pnpm test:integration`、`pnpm test:isolation`、`pnpm test:conformance` 全部执行并通过。
 - [ ] 原 G0–G12 与 WP-G0–WP-G10 证据齐全。
 - [ ] 研究和实验没有自动合并或部署；工程合并有独立评审和版本回执。
+- [ ] 工程交付的评审链与任务书 `riskLevel` 一致：low 一次终审、medium 规格+实现双闸门、high 另加独立总审；simple+high 未降为单终审，complex+low 未因复杂度额外加闸门。
 - [ ] 没有凭据、完整环境变量或不必要的模型输出进入日志。
 - [ ] 没有遗留 Agent、容器、jj workspace、注册项、终端、临时目录或未说明的外部副作用。
 - [ ] 评审、评估、总审身份和 Session 边界清晰，没有自我签核。
