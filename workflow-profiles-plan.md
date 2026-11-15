@@ -122,11 +122,11 @@ flowchart TD
 | P0.4 | `docs/pilot/`、`runbook.md`、`/Users/souler/yfp/.claude/skills/orca-coord/SKILL.md` |
 | P0.5 | `deploy/nix/` |
 | P0.6 | `test/isolation/nix/` |
-| P1.1 | `src/domain/task-spec.ts`、`src/domain/workflow-spec.ts`、`src/domain/errors.ts`、`src/db/migrations.ts`、`src/services/tasks.ts`、`src/services/workspaces.ts`、`test/unit/domain/` |
+| P1.1 | `src/domain/task-spec.ts`、`src/domain/workflow-spec.ts`、`src/domain/errors.ts`、`src/db/migrations.ts`、`src/services/tasks.ts`、`src/services/workspaces.ts`、`src/api.ts`、`src/services/claims.ts`、`test/unit/domain/` |
 | P1.2 | `src/state/workflow-profiles.ts`、`src/services/workflow-state.ts`、`src/services/ports.ts`、`src/domain/evidence.ts`、`src/services/cleanup.ts`、`test/unit/state/` |
 | P1.3 | `src/prompts/prompt-set.ts`、`prompts/`、`src/services/model-channels.ts`、`src/config.ts`、`src/services/claims.ts`、`src/services/ports.ts`、`src/adapters/orca.ts`、`test/unit/prompts/`、`test/unit/model-channels/`、`deploy/README.md` |
-| P2.1 | `src/services/research.ts`、`src/services/research-evidence.ts`、`test/unit/research/`、`test/integration/research/` |
-| P2.2 | `src/services/experiments.ts`、`src/services/judge.ts`、`test/unit/experiments/`、`test/integration/experiments/` |
+| P2.1 | `src/services/research.ts`、`src/services/research-evidence.ts`、`src/api.ts`、`test/unit/research/`、`test/integration/research/` |
+| P2.2 | `src/services/experiments.ts`、`src/services/judge.ts`、`src/api.ts`、`test/unit/experiments/`、`test/integration/experiments/` |
 | P2.3 | `src/services/review-gates.ts`、`src/services/reviews.ts`、`src/services/merges.ts`、`src/services/claims.ts`、`test/unit/review-gates/` |
 | P3.1 | `docs/pilots/research/` |
 | P3.2 | `docs/pilots/experiment/` |
@@ -136,7 +136,7 @@ flowchart TD
 
 `execution/` 只保存执行过程记录，已由忽略规则排除，不作为实现任务的交付源码。任何新错误码统一归 P1.1，其他任务不得新增错误码文件或改写既有错误码语义。
 
-顺序共享文件说明：P0.1 只做失败诊断，`claims.ts` 的后续写入按 P0.3→P1.3→P2.3 顺序执行；`ports.ts` 按 P1.2→P1.3 顺序执行；同一文件跨阶段只能在上一波次完成后修改，禁止并行写入。
+顺序共享文件说明：`claims.ts` 按 P0.3→P1.1→P1.3→P2.1/P2.2→P2.3 顺序执行；`ports.ts` 按 P1.2→P1.3 顺序执行；`api.ts` 按 P0.3→P1.1→P2.1/P2.2 顺序执行；同一文件跨阶段只能在上一波次完成后修改，禁止并行写入。
 
 ## 6. Phase 0：基线修复与剩余工程任务
 
@@ -160,8 +160,8 @@ flowchart TD
 
 - **Files**：创建 `src/services/budgets.ts`、`src/services/status.ts`、`test/unit/budgets/`；修改 `src/services/claims.ts`、`src/services/reviews.ts`、`src/api.ts`。
 - **Inputs**：设计 §11.2、T1.2 事件记录、T5.3 角色配置。
-- **Outputs**：活动任务与评审并发限制、状态摘要、阻塞原因、下一步和状态变化通知；任务/评审派发前的准入检查与 handler 接线。
-- **Accept rule**：达到预算时等待，不自动换模型；普通进度不通知人；异常包含可执行下一步；构建并发与供应商准入仍按已裁定的延后项处理。每次 claim 或 review workerStart 前必须检查活动任务/评审数；达到两任务一评审时等待，不能只在 status 摘要中显示而不阻断。
+- **Outputs**：活动任务与评审并发限制、状态摘要、阻塞原因、下一步和状态变化通知；任务/评审派发前的准入检查与 handler 接线；`beforeSource` 与 `beforeRun` 预算检查入口及停派结果。
+- **Accept rule**：达到预算时等待，不自动换模型；普通进度不通知人；异常包含可执行下一步；构建并发与供应商准入仍按已裁定的延后项处理。每次 claim 或 review workerStart 前必须检查活动任务/评审数；达到两任务一评审时等待，不能只在 status 摘要中显示而不阻断。来源/运行预算耗尽时进入 PARKED 或既定等待态，不产生新的 source/run worker；`beforeSource`/`beforeRun` 预算检查必须能被 P2.1/P2.2 调用，不能只限制 claim/review 总数。
 - **Verification gate**：验证两个任务和一个评审上限；模拟供应商 429、消息重复和通知失败，均不改变治理状态。
 
 ### P0.4 完成 T6.3 真实 Agent 试点与工作流更新
@@ -192,18 +192,18 @@ flowchart TD
 
 ### P1.1 实现 TaskSpec v2 与迁移
 
-- **Files**：修改 `src/domain/task-spec.ts`；创建 `src/domain/workflow-spec.ts`；追加 `src/db/migrations.ts`；修改 `src/domain/errors.ts`、`src/services/tasks.ts`、`src/services/workspaces.ts` 和 `test/unit/domain/`。
+- **Files**：修改 `src/domain/task-spec.ts`；创建 `src/domain/workflow-spec.ts`；追加 `src/db/migrations.ts`；修改 `src/domain/errors.ts`、`src/services/tasks.ts`、`src/services/workspaces.ts`、`src/api.ts`、`src/services/claims.ts` 和 `test/unit/domain/`。
 - **Inputs**：现有 v1 schema、设计 §6、会话证据中的三类交付物。
-- **Outputs**：`workType`（`research`/`experiment`/`engineering`）、`complexity`（`simple`/`medium`/`complex`）、`stageChannels`、三类 profile-specific spec、v1→v2 迁移和读取分支；`agentPolicy` 继续表示 harness 选择，与 `stageChannels` 的模型 settings 注入分离。消费者分支：`tasks.ts`/`workspaces.ts` 中 v1 的 target/baseCommitId 持久化与 workspace 创建保持不变；research/experiment 使用 runRoot/artifactRoot，不持久化工程 target/baseCommitId，不创建代码 workspace；engineering 保持现状。
-- **Accept rule**：v1 输入继续按工程语义处理；v2 必填字段按类型校验；研究和实验不要求 `baseCommitId` 或 bookmark；`stageChannels` 只引用已配置通道，不携带凭据；模型默认值不得新增。`agentPolicy` 在 v2 中保留为 harness 选择，v1 的 literal/enum 语义不变，`claims.ts` 的 `workerStart.agent` 来源对 v1/v2 一致，模型只通过 settings 注入切换。`tasks.ts` 与 `workspaces.ts` 必须按 workType 分支处理，不能要求研究/实验携带工程基线。
+- **Outputs**：`workType`（`research`/`experiment`/`engineering`）、`complexity`（`simple`/`medium`/`complex`）、`stageChannels`、三类 profile-specific spec、v1→v2 迁移和读取分支；`agentPolicy` 继续表示 harness 选择，与 `stageChannels` 的模型 settings 注入分离。消费者分支：`tasks.ts`/`workspaces.ts` 中 v1 的 target/baseCommitId 持久化与 workspace 创建保持不变；research/experiment 使用 runRoot/artifactRoot，不持久化工程 target/baseCommitId，不创建代码 workspace；engineering 保持现状。按 workType 分发的 declare/claim 处理器：复用现有 `declare`/`claim` 动作，不发明新的动作名；research/experiment 使用 `runRoot` 作为工作目录与证据根目录，跳过 `prepareWorkspace` 的代码 workspace 创建，workerStart 以 runRoot 启动；engineering 仍走原代码 workspace。按类型的预算字段与扣减语义：research 为 `maxSources`、`maxSourceBytes`、`maxWallSeconds`，达到来源或时间预算即停止并保留已收集证据；experiment 为 `maxRuns`、`maxConcurrentRuns`、`maxRunSeconds`、`maxEvidenceBytes`，每次运行前检查，超限停止，不自动重试；v1 的 `maxReviewRounds`/`maxWallSeconds`/`maxEvidenceBytes` 兼容语义保留，engineering 不新增字段。资源语义：`runRoot` 是临时执行目录，必须登记为可销毁清理项；`artifactRoot` 是交付目录，只登记归档与保留状态，不得被普通清理删除；`src/db/migrations.ts` 的清理项类型必须覆盖 runRoot 与 artifactRoot，并区分 destroy 与 retain。
+- **Accept rule**：v1 输入继续按工程语义处理；v2 必填字段按类型校验；研究和实验不要求 `baseCommitId` 或 bookmark；`stageChannels` 只引用已配置通道，不携带凭据；模型默认值不得新增。`agentPolicy` 在 v2 中保留为 harness 选择，v1 的 literal/enum 语义不变，`claims.ts` 的 `workerStart.agent` 来源对 v1/v2 一致，模型只通过 settings 注入切换。`tasks.ts` 与 `workspaces.ts` 必须按 workType 分支处理，不能要求研究/实验携带工程基线。`api.ts` 必须能按 workType 将请求路由到 research/experiment handler；`claims.ts` 必须支持 runRoot 启动而非只接受 hostPath；研究/实验不能直接复用 engineering 的 baseCommit/workspace 前置。预算字段必须进入 v2 schema，来源/运行预算在每次派发前扣减或拒绝，不能只写在文档或状态摘要里。
 - **Verification gate**：旧任务解析不变；未知字段、错误类型、缺失基线（对照实验）、缺失来源范围（研究）均拒绝；迁移幂等且可回滚。
 
 ### P1.2 实现按类型分状态机与证据记录
 
 - **Files**：创建 `src/state/workflow-profiles.ts`、`src/services/workflow-state.ts`、`src/domain/evidence.ts`、`src/services/cleanup.ts`；修改 `src/services/ports.ts` 和 `test/unit/state/`。
 - **Inputs**：设计 §7、§13；P1.1 profile 类型；现有任务/认领/操作记录。
-- **Outputs**：研究状态 `collecting/analyzing/decision_review/done/parked`、实验状态 `design_review/running/benchmarking/report_review/decided/parked`、证据类型 `source/run-receipt/metric/decision`、操作员豁免记录。完整迁移边与终态映射：研究 `DECLARED→COLLECTING→ANALYZING→DECISION_REVIEW→DONE/PARKED`，退回可回 `ANALYZING`，预算耗尽/人工取消到 `PARKED/CANCELLED`；实验 `DECLARED→DESIGN_REVIEW→RUNNING→BENCHMARKING→REPORT_REVIEW→DECIDED/PARKED`，设计退回可回 `DESIGN_REVIEW`，预算内重跑可回 `RUNNING`，预算耗尽到 `PARKED`，取消到 `CANCELLED`。研究和实验的 `DONE`/`DECIDED` 都是业务终态，不走 `MERGED`；完成/取消/中止后均经 archive+cleanup，`cleanup_pending` 可重试，不调用 confirmMerge。
-- **Accept rule**：非法迁移拒绝；研究到工程必须新建工程任务；实验禁止直接 merge；`NOT_READY` 未记录操作员豁免不得继续；外部结果不确定时不自动重试。状态名、迁移边、重试/停止条件和清理动作一一对应；非工程终态不得进入 confirmMerge。
+- **Outputs**：研究状态 `collecting/analyzing/decision_review/done/parked`、实验状态 `design_review/running/benchmarking/report_review/decided/parked`、证据类型 `source/run-receipt/metric/decision`、操作员豁免记录。完整迁移边与终态映射：研究 `DECLARED→COLLECTING→ANALYZING→DECISION_REVIEW→DONE/PARKED`，退回可回 `ANALYZING`，预算耗尽/人工取消到 `PARKED/CANCELLED`；实验 `DECLARED→DESIGN_REVIEW→RUNNING→BENCHMARKING→REPORT_REVIEW→DECIDED/PARKED`，设计退回可回 `DESIGN_REVIEW`，预算内重跑可回 `RUNNING`，预算耗尽到 `PARKED`，取消到 `CANCELLED`。研究和实验的 `DONE`/`DECIDED` 都是业务终态，不走 `MERGED`；完成/取消/中止后均经 archive+cleanup，`cleanup_pending` 可重试，不调用 confirmMerge。runRoot/artifactRoot 的登记、归档、销毁/保留回执。
+- **Accept rule**：非法迁移拒绝；研究到工程必须新建工程任务；实验禁止直接 merge；`NOT_READY` 未记录操作员豁免不得继续；外部结果不确定时不自动重试。状态名、迁移边、重试/停止条件和清理动作一一对应；非工程终态不得进入 confirmMerge。runRoot 只有在归档成功后才可删除；artifactRoot 只归档和保留，不得因 confirmMerge 缺失而被删除；归档失败时保留全部目录并进入 cleanup_pending；研究/实验产物不得被当作普通 workspace 清理。
 - **Verification gate**：覆盖全部合法边、终态无出边、豁免留痕、证据不可改写、重复恢复不产生重复副作用。
 
 ### P1.3 实现角色材料 v2 与模型通道注入
@@ -218,18 +218,18 @@ flowchart TD
 
 ### P2.1 实现探索型研究流程
 
-- **Files**：创建 `src/services/research.ts`、`src/services/research-evidence.ts`、`test/unit/research/`、`test/integration/research/`。
+- **Files**：创建 `src/services/research.ts`、`src/services/research-evidence.ts`、`test/unit/research/`、`test/integration/research/`；修改 `src/api.ts`。
 - **Inputs**：P1.1 研究任务书、P1.2 状态和证据、P1.3 采集与分析通道。
-- **Outputs**：来源清单、分主题笔记、报告或 ADR、未知项和采用/继续实验/转工程/搁置决定。
-- **Accept rule**：采集只记录来源事实，分析必须能回溯到来源；不以对照实验或代码合并作为必需出口；达到时间或来源预算后必须形成可审阅结果。
+- **Outputs**：来源清单、分主题笔记、报告或 ADR、未知项和采用/继续实验/转工程/搁置决定；handler 注册：研究注册 declare/claim 的研究处理入口。
+- **Accept rule**：采集只记录来源事实，分析必须能回溯到来源；不以对照实验或代码合并作为必需出口；达到时间或来源预算后必须形成可审阅结果。研究角色的 declare/claim 可经 API 到达研究服务，未注册时明确返回未实现而不是误走工程路径；研究来源派发必须经过 `beforeSource` 预算入口，超额后保留已有证据并按 PARKED 结束。
 - **Verification gate**：报告可不经过实验直接结束；来源与主张可互查；无来源支持的断言标为未知；不发生自动 push、merge 或部署。
 
 ### P2.2 实现对照实验与独立评测流程
 
-- **Files**：创建 `src/services/experiments.ts`、`src/services/judge.ts`、`test/unit/experiments/`、`test/integration/experiments/`。
+- **Files**：创建 `src/services/experiments.ts`、`src/services/judge.ts`、`test/unit/experiments/`、`test/integration/experiments/`；修改 `src/api.ts`。
 - **Inputs**：实验任务书、基线、变量矩阵、固定输入、指标、样本策略、停止规则、执行与评测通道。
-- **Outputs**：锁定实验设计、运行回执、原始输出、评分器结果、分母与失败样本、分析报告和采用决定。
-- **Accept rule**：对照实验必须有基线和预先声明指标；一次只改变一个主要变量；运行中不得修改实验设计；评测与实现分离；实验不自动合并。
+- **Outputs**：锁定实验设计、运行回执、原始输出、评分器结果、分母与失败样本、分析报告和采用决定；handler 注册：实验注册 declare/claim 的实验处理入口。
+- **Accept rule**：对照实验必须有基线和预先声明指标；一次只改变一个主要变量；运行中不得修改实验设计；评测与实现分离；实验不自动合并。实验角色的 declare/claim 可经 API 到达实验服务，未注册时明确返回未实现而不是误走工程路径；实验运行派发必须经过 `beforeRun` 预算入口，超额后保留已有证据并按 PARKED 结束。
 - **Verification gate**：缺基线或指标拒绝启动；原始结果不可改写；分母、缺答、降级和失败样本齐全；独立 judge 输出可复核；达到预算即停止并保留阴性结果。
 
 ### P2.3 实现工程风险分级评审与豁免
