@@ -122,7 +122,7 @@ flowchart TD
 | P0.4 | `docs/pilot/`、`runbook.md`、`/Users/souler/yfp/.claude/skills/orca-coord/SKILL.md` |
 | P0.5 | `deploy/nix/` |
 | P0.6 | `test/isolation/nix/` |
-| P1.1 | `src/domain/task-spec.ts`、`src/domain/workflow-spec.ts`、`src/domain/errors.ts`、`src/db/migrations.ts`、`src/services/tasks.ts`、`src/services/workspaces.ts`、`src/api.ts`、`src/services/claims.ts`、`test/unit/domain/` |
+| P1.1 | `src/domain/task-spec.ts`、`src/domain/workflow-spec.ts`、`src/domain/errors.ts`、`src/db/migrations.ts`、`src/services/tasks.ts`、`src/services/workspaces.ts`、`src/api.ts`、`src/services/claims.ts`、`src/server.ts`、`test/unit/domain/` |
 | P1.2 | `src/state/workflow-profiles.ts`、`src/services/workflow-state.ts`、`src/services/ports.ts`、`src/domain/evidence.ts`、`src/services/cleanup.ts`、`test/unit/state/` |
 | P1.3 | `src/prompts/prompt-set.ts`、`prompts/`、`src/services/model-channels.ts`、`src/config.ts`、`src/services/claims.ts`、`src/services/ports.ts`、`src/adapters/orca.ts`、`test/unit/prompts/`、`test/unit/model-channels/`、`deploy/README.md` |
 | P2.1 | `src/services/research.ts`、`src/services/research-evidence.ts`、`src/api.ts`、`test/unit/research/`、`test/integration/research/` |
@@ -160,8 +160,8 @@ flowchart TD
 
 - **Files**：创建 `src/services/budgets.ts`、`src/services/status.ts`、`test/unit/budgets/`；修改 `src/services/claims.ts`、`src/services/reviews.ts`、`src/api.ts`。
 - **Inputs**：设计 §11.2、T1.2 事件记录、T5.3 角色配置。
-- **Outputs**：活动任务与评审并发限制、状态摘要、阻塞原因、下一步和状态变化通知；任务/评审派发前的准入检查与 handler 接线；`beforeSource` 与 `beforeRun` 预算检查入口及停派结果。
-- **Accept rule**：达到预算时等待，不自动换模型；普通进度不通知人；异常包含可执行下一步；构建并发与供应商准入仍按已裁定的延后项处理。每次 claim 或 review workerStart 前必须检查活动任务/评审数；达到两任务一评审时等待，不能只在 status 摘要中显示而不阻断。来源/运行预算耗尽时进入 PARKED 或既定等待态，不产生新的 source/run worker；`beforeSource`/`beforeRun` 预算检查必须能被 P2.1/P2.2 调用，不能只限制 claim/review 总数。
+- **Outputs**：活动任务与评审并发限制、状态摘要、阻塞原因、下一步和状态变化通知；任务/评审派发前的准入检查与 handler 接线；`beforeSource` 与 `beforeRun` 预算检查入口及停派结果；`beforeSource`/`beforeRun` 除次数与字节检查外，还检查任务级 wallSeconds 与 run-level 超时，超限进入 PARKED，不自动重试。执行中用量结算与停止：`recordSourceUsage`、`recordRunUsage`、`isBudgetExceeded` 与超时取消回执，覆盖执行中的来源/运行用量，而不只 `beforeSource`/`beforeRun` 派发前检查。
+- **Accept rule**：达到预算时等待，不自动换模型；普通进度不通知人；异常包含可执行下一步；构建并发与供应商准入仍按已裁定的延后项处理。每次 claim 或 review workerStart 前必须检查活动任务/评审数；达到两任务一评审时等待，不能只在 status 摘要中显示而不阻断。来源/运行预算耗尽时进入 PARKED 或既定等待态，不产生新的 source/run worker；`beforeSource`/`beforeRun` 预算检查必须能被 P2.1/P2.2 调用，不能只限制 claim/review 总数。`beforeSource`/`beforeRun` 除次数与字节检查外，还须检查任务级 wallSeconds 和 run-level 超时，超限进入 PARKED，不自动重试。
 - **Verification gate**：验证两个任务和一个评审上限；模拟供应商 429、消息重复和通知失败，均不改变治理状态。
 
 ### P0.4 完成 T6.3 真实 Agent 试点与工作流更新
@@ -192,10 +192,10 @@ flowchart TD
 
 ### P1.1 实现 TaskSpec v2 与迁移
 
-- **Files**：修改 `src/domain/task-spec.ts`；创建 `src/domain/workflow-spec.ts`；追加 `src/db/migrations.ts`；修改 `src/domain/errors.ts`、`src/services/tasks.ts`、`src/services/workspaces.ts`、`src/api.ts`、`src/services/claims.ts` 和 `test/unit/domain/`。
+- **Files**：修改 `src/domain/task-spec.ts`；创建 `src/domain/workflow-spec.ts`；追加 `src/db/migrations.ts`；修改 `src/domain/errors.ts`、`src/services/tasks.ts`、`src/services/workspaces.ts`、`src/api.ts`、`src/services/claims.ts`、`src/server.ts` 和 `test/unit/domain/`。
 - **Inputs**：现有 v1 schema、设计 §6、会话证据中的三类交付物。
-- **Outputs**：`workType`（`research`/`experiment`/`engineering`）、`complexity`（`simple`/`medium`/`complex`）、`stageChannels`、三类 profile-specific spec、v1→v2 迁移和读取分支；`agentPolicy` 继续表示 harness 选择，与 `stageChannels` 的模型 settings 注入分离。消费者分支：`tasks.ts`/`workspaces.ts` 中 v1 的 target/baseCommitId 持久化与 workspace 创建保持不变；research/experiment 使用 runRoot/artifactRoot，不持久化工程 target/baseCommitId，不创建代码 workspace；engineering 保持现状。按 workType 分发的 declare/claim 处理器：复用现有 `declare`/`claim` 动作，不发明新的动作名；research/experiment 使用 `runRoot` 作为工作目录与证据根目录，跳过 `prepareWorkspace` 的代码 workspace 创建，workerStart 以 runRoot 启动；engineering 仍走原代码 workspace。按类型的预算字段与扣减语义：research 为 `maxSources`、`maxSourceBytes`、`maxWallSeconds`，达到来源或时间预算即停止并保留已收集证据；experiment 为 `maxRuns`、`maxConcurrentRuns`、`maxRunSeconds`、`maxEvidenceBytes`，每次运行前检查，超限停止，不自动重试；v1 的 `maxReviewRounds`/`maxWallSeconds`/`maxEvidenceBytes` 兼容语义保留，engineering 不新增字段。资源语义：`runRoot` 是临时执行目录，必须登记为可销毁清理项；`artifactRoot` 是交付目录，只登记归档与保留状态，不得被普通清理删除；`src/db/migrations.ts` 的清理项类型必须覆盖 runRoot 与 artifactRoot，并区分 destroy 与 retain。
-- **Accept rule**：v1 输入继续按工程语义处理；v2 必填字段按类型校验；研究和实验不要求 `baseCommitId` 或 bookmark；`stageChannels` 只引用已配置通道，不携带凭据；模型默认值不得新增。`agentPolicy` 在 v2 中保留为 harness 选择，v1 的 literal/enum 语义不变，`claims.ts` 的 `workerStart.agent` 来源对 v1/v2 一致，模型只通过 settings 注入切换。`tasks.ts` 与 `workspaces.ts` 必须按 workType 分支处理，不能要求研究/实验携带工程基线。`api.ts` 必须能按 workType 将请求路由到 research/experiment handler；`claims.ts` 必须支持 runRoot 启动而非只接受 hostPath；研究/实验不能直接复用 engineering 的 baseCommit/workspace 前置。预算字段必须进入 v2 schema，来源/运行预算在每次派发前扣减或拒绝，不能只写在文档或状态摘要里。
+- **Outputs**：`workType`（`research`/`experiment`/`engineering`）、`complexity`（`simple`/`medium`/`complex`）、`stageChannels`、三类 profile-specific spec、v1→v2 迁移和读取分支；`agentPolicy` 继续表示 harness 选择，与 `stageChannels` 的模型 settings 注入分离。消费者分支：`tasks.ts`/`workspaces.ts` 中 v1 的 target/baseCommitId 持久化与 workspace 创建保持不变；research/experiment 使用 runRoot/artifactRoot，不持久化工程 target/baseCommitId，不创建代码 workspace；engineering 保持现状。按 workType 分发的 declare/claim 处理器：复用现有 `declare`/`claim` 动作，不发明新的动作名；research/experiment 使用 `runRoot` 作为工作目录与证据根目录，跳过 `prepareWorkspace` 的代码 workspace 创建，workerStart 以 runRoot 启动；engineering 仍走原代码 workspace。按类型的预算字段与扣减语义：research 为 `maxSources`、`maxSourceBytes`、`maxWallSeconds`，达到来源或时间预算即停止并保留已收集证据；experiment 为 `maxRuns`、`maxConcurrentRuns`、`maxRunSeconds`、`maxWallSeconds`、`maxEvidenceBytes`；`maxWallSeconds` 是任务级墙钟总预算，区别于单次运行的 `maxRunSeconds`，worker 令牌有效期取 `min(maxWallSeconds, 配置上限)`，恢复时继续使用同一有效期，缺失期限不得被解释为永不过期；每次运行前检查，超限停止，不自动重试；v1 的 `maxReviewRounds`/`maxWallSeconds`/`maxEvidenceBytes` 兼容语义保留，engineering 不新增字段。资源语义：`runRoot` 是临时执行目录，必须登记为可销毁清理项；`artifactRoot` 是交付目录，只登记归档与保留状态，不得被普通清理删除；`src/db/migrations.ts` 的清理项类型必须覆盖 runRoot 与 artifactRoot，并区分 destroy 与 retain。server 装配：生产启动时由 `createOrcaAdapter`、`createJjAdapter`、`createEnvironmentAdapter` 和 trustProvision 构造 `claimDeps` 并传入 `registerCoreHandlers`，不得只创建空注册表。
+- **Accept rule**：v1 输入继续按工程语义处理；v2 必填字段按类型校验；研究和实验不要求 `baseCommitId` 或 bookmark；`stageChannels` 只引用已配置通道，不携带凭据；模型默认值不得新增。`agentPolicy` 在 v2 中保留为 harness 选择，v1 的 literal/enum 语义不变，`claims.ts` 的 `workerStart.agent` 来源对 v1/v2 一致，模型只通过 settings 注入切换。`tasks.ts` 与 `workspaces.ts` 必须按 workType 分支处理，不能要求研究/实验携带工程基线。`api.ts` 必须能按 workType 将请求路由到 research/experiment handler；`claims.ts` 必须支持 runRoot 启动而非只接受 hostPath；研究/实验不能直接复用 engineering 的 baseCommit/workspace 前置。预算字段必须进入 v2 schema，来源/运行预算在每次派发前扣减或拒绝，不能只写在文档或状态摘要里。declare/claim/accept 的 handler 在 server 启动后必须已注册，不能因缺少 `claimDeps` 返回 unregistered；单测必须验证 server 装配后的 declare/claim/accept 调用路径。experiment 必须同时支持 run-level 与 task-level 时间预算，`claims.ts` 不得只用 `maxRunSeconds` 或缺失字段签发令牌。
 - **Verification gate**：旧任务解析不变；未知字段、错误类型、缺失基线（对照实验）、缺失来源范围（研究）均拒绝；迁移幂等且可回滚。
 
 ### P1.2 实现按类型分状态机与证据记录
@@ -210,9 +210,9 @@ flowchart TD
 
 - **Files**：修改 `src/prompts/prompt-set.ts`、`src/config.ts`、`src/services/claims.ts`、`src/services/ports.ts`、`src/adapters/orca.ts`；创建 `prompts/` 下按类型和复杂度划分的材料、`src/services/model-channels.ts`、`test/unit/prompts/`、`test/unit/model-channels/`；修改 `deploy/README.md`。
 - **Inputs**：设计 §12、现有四模板装配、模型路由候选、`~/.cenv/` 文件名（不读取内容）。
-- **Outputs**：独立的 v2 材料版本标识与 manifest/hash、`prompts/v2/<profile>/<role>-<complexity>.md` 材料、绝对路径 settings 注入和通道回执；v1 根目录四份模板及其 `promptSetHash` 行为不变。真实启动链路：`TaskSpec.stageChannels → claim 通道解析 → claims.workerStart({settings: 绝对路径}) → ports/orca.workerStart → Orca worker-start`；`workerStart.agent` 的 harness 选择不变。
-- **Accept rule**：模板不包含模型名、令牌或管理命令教程；hash 只用于材料完整性；注入路径不得使用 `~`；不同角色可使用不同 Session 或新上下文；hook 失效不改变容器权限；v1 根目录四份模板及其解析/哈希行为保持可用，v2 材料必须位于 `prompts/v2/<profile>/` 子目录并使用独立 manifest/hash，未知 profile 失败关闭。启动适配器必须接收并转发 settings 绝对路径，不能用 Agent 传入的 `~`、身份字段或 shell 拼接；必须能用假 Orca 适配器验证 settings 到达启动入口。
-- **Verification gate**：材料清单与 hash 确定；占位符无残留；通道切换只改变 settings 文件；敏感内容扫描通过；简单/中等/复杂三种模板均能被正确装配。
+- **Outputs**：独立的 v2 材料版本标识与 manifest/hash、`prompts/v2/<profile>/<role>-<complexity>.md` 材料、绝对路径 settings 注入和通道回执；v1 根目录四份模板及其 `promptSetHash` 行为不变。真实启动链路：`TaskSpec.stageChannels → 选择并生成 agent Command（claude --settings <绝对路径>）→ claims.workerStart({agent: harness}) → ports/orca.workerStart`；`workerStart` 只接收 harness/agent，settings 通过 agent Command 注入，不进入 `workerStart` 参数；`workerStart.agent` 的 harness 选择不变。
+- **Accept rule**：模板不包含模型名、令牌或管理命令教程；hash 只用于材料完整性；注入路径不得使用 `~`；不同角色可使用不同 Session 或新上下文；hook 失效不改变容器权限；v1 根目录四份模板及其解析/哈希行为保持可用，v2 材料必须位于 `prompts/v2/<profile>/` 子目录并使用独立 manifest/hash，未知 profile 失败关闭。启动适配器必须接收并转发 settings 绝对路径，不能用 Agent 传入的 `~`、身份字段或 shell 拼接；必须能用假 Orca 适配器验证 settings 到达启动入口。`workerStart` 只传 harness/agent，不传 `--settings`；settings 通过受支持的 agent Command 或 `claude --settings <绝对路径>` 注入，绝对路径来自已配置通道；若通道不是 Claude settings 文件，按其 harness 支持的配置方式处理，失败关闭。
+- **Verification gate**：材料清单与 hash 确定；占位符无残留；通道切换只改变 settings 文件；敏感内容扫描通过；简单/中等/复杂三种模板均能被正确装配。证据：`orca orchestration worker-start --help` 无 `--settings`；`claude --help` 有 `--settings <file-or-json>`；不得把 Orca `--environment` 当作 settings 文件参数（它用于选择配对的 Orca server）。
 
 ## 8. Phase 2：三类工作流实现
 
@@ -220,16 +220,16 @@ flowchart TD
 
 - **Files**：创建 `src/services/research.ts`、`src/services/research-evidence.ts`、`test/unit/research/`、`test/integration/research/`；修改 `src/api.ts`。
 - **Inputs**：P1.1 研究任务书、P1.2 状态和证据、P1.3 采集与分析通道。
-- **Outputs**：来源清单、分主题笔记、报告或 ADR、未知项和采用/继续实验/转工程/搁置决定；handler 注册：研究注册 declare/claim 的研究处理入口。
-- **Accept rule**：采集只记录来源事实，分析必须能回溯到来源；不以对照实验或代码合并作为必需出口；达到时间或来源预算后必须形成可审阅结果。研究角色的 declare/claim 可经 API 到达研究服务，未注册时明确返回未实现而不是误走工程路径；研究来源派发必须经过 `beforeSource` 预算入口，超额后保留已有证据并按 PARKED 结束。
+- **Outputs**：来源清单、分主题笔记、报告或 ADR、未知项和采用/继续实验/转工程/搁置决定；handler 注册：研究注册 declare/claim 的研究处理入口。每个来源都有进度检查点、实际来源数/字节数/耗时记录和超时取消路径；单个来源持续输出或卡住时，必须在检查点或超时处停止，保留已完成证据并进入 PARKED，不能无限等待下一次派发；复用现有 `withStepTimeout` 与 operations 回执，不新建第二套恢复机制。
+- **Accept rule**：采集只记录来源事实，分析必须能回溯到来源；不以对照实验或代码合并作为必需出口；达到时间或来源预算后必须形成可审阅结果。研究角色的 declare/claim 可经 API 到达研究服务，未注册时明确返回未实现而不是误走工程路径；研究来源派发必须经过 `beforeSource` 预算入口，超额后保留已有证据并按 PARKED 结束；单个来源持续输出或卡住时，必须在检查点或超时处停止，保留已完成证据并进入 PARKED，不能无限等待下一次派发。
 - **Verification gate**：报告可不经过实验直接结束；来源与主张可互查；无来源支持的断言标为未知；不发生自动 push、merge 或部署。
 
 ### P2.2 实现对照实验与独立评测流程
 
 - **Files**：创建 `src/services/experiments.ts`、`src/services/judge.ts`、`test/unit/experiments/`、`test/integration/experiments/`；修改 `src/api.ts`。
 - **Inputs**：实验任务书、基线、变量矩阵、固定输入、指标、样本策略、停止规则、执行与评测通道。
-- **Outputs**：锁定实验设计、运行回执、原始输出、评分器结果、分母与失败样本、分析报告和采用决定；handler 注册：实验注册 declare/claim 的实验处理入口。
-- **Accept rule**：对照实验必须有基线和预先声明指标；一次只改变一个主要变量；运行中不得修改实验设计；评测与实现分离；实验不自动合并。实验角色的 declare/claim 可经 API 到达实验服务，未注册时明确返回未实现而不是误走工程路径；实验运行派发必须经过 `beforeRun` 预算入口，超额后保留已有证据并按 PARKED 结束。
+- **Outputs**：锁定实验设计、运行回执、原始输出、评分器结果、分母与失败样本、分析报告和采用决定；handler 注册：实验注册 declare/claim 的实验处理入口。每次运行都有进度检查点、实际运行数/字节数/耗时记录和超时取消路径；单次运行卡住时，必须在检查点或超时处停止，保留已完成证据并进入 PARKED，不能无限等待下一次派发；复用现有 `withStepTimeout` 与 operations 回执，不新建第二套恢复机制。
+- **Accept rule**：对照实验必须有基线和预先声明指标；一次只改变一个主要变量；运行中不得修改实验设计；评测与实现分离；实验不自动合并。实验角色的 declare/claim 可经 API 到达实验服务，未注册时明确返回未实现而不是误走工程路径；实验运行派发必须经过 `beforeRun` 预算入口，超额后保留已有证据并按 PARKED 结束；单次运行卡住时，必须在检查点或超时处停止，保留已完成证据并进入 PARKED，不能无限等待下一次派发。
 - **Verification gate**：缺基线或指标拒绝启动；原始结果不可改写；分母、缺答、降级和失败样本齐全；独立 judge 输出可复核；达到预算即停止并保留阴性结果。
 
 ### P2.3 实现工程风险分级评审与豁免
